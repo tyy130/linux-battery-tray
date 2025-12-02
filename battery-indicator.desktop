@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Battery Indicator
+Comment=System tray battery indicator for Linux
+Exec=python3 /opt/battery-indicator/battery_indicator.py
+Icon=battery
+Terminal=false
+Categories=Utility;System;Monitor;
+Keywords=battery;power;indicator;tray;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
