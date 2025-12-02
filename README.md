@@ -10,6 +10,8 @@ A lightweight, reliable system tray battery indicator for Linux using Python and
 
 - **Real-time battery percentage display** in the system tray
 - **Dynamic icons** that change based on battery level and charging status
+- **Informative tooltips** showing battery status when hovering over the tray icon
+- **System symbolic icons** for better desktop integration and animated icon support
 - **Charging/discharging status detection** with visual indicators
 - **Low battery warnings** via desktop notifications (at 15% and 5%)
 - **Time remaining estimates** using upower
@@ -24,14 +26,16 @@ A lightweight, reliable system tray battery indicator for Linux using Python and
 
 ## Icon States
 
+Uses system symbolic icons for better desktop integration and animated icon support on compatible systems.
+
 | Battery Level | Normal Icon | Charging Icon |
 |---------------|-------------|---------------|
-| ≥80% (Full) | `battery-full` | `battery-full-charging` |
-| ≥50% (Good) | `battery-good` | `battery-good-charging` |
-| ≥20% (Low) | `battery-low` | `battery-low-charging` |
-| ≥10% (Caution) | `battery-caution` | `battery-caution-charging` |
-| <10% (Empty) | `battery-empty` | - |
-| No Battery | `battery-missing` | - |
+| ≥80% (Full) | `battery-full-symbolic` | `battery-full-charging-symbolic` |
+| ≥50% (Good) | `battery-good-symbolic` | `battery-good-charging-symbolic` |
+| ≥20% (Low) | `battery-low-symbolic` | `battery-low-charging-symbolic` |
+| ≥10% (Caution) | `battery-caution-symbolic` | `battery-caution-charging-symbolic` |
+| <10% (Empty) | `battery-empty-symbolic` | - |
+| No Battery | `battery-missing-symbolic` | - |
 
 ## Installation
 
