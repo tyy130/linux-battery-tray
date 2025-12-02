@@ -593,6 +593,17 @@ class BatteryIndicator:
 
     def _perform_uninstall(self) -> None:
         """Perform the actual uninstallation."""
+        # Validate install directory to prevent accidental deletion of system files
+        # Only allow uninstall from the expected installation directory
+        expected_install_dir = "/opt/battery-indicator"
+        if self.install_dir != expected_install_dir:
+            self.send_notification(
+                "Uninstall Error",
+                "Invalid installation directory. Please uninstall manually.",
+                "normal"
+            )
+            return
+
         # Show progress notification
         self.send_notification(
             "Uninstalling",
@@ -600,9 +611,9 @@ class BatteryIndicator:
             "normal"
         )
 
-        # Uninstall commands
+        # Uninstall commands with explicit paths (not user-configurable)
         uninstall_commands = [
-            ['sudo', 'rm', '-rf', self.install_dir],
+            ['sudo', 'rm', '-rf', expected_install_dir],
             ['sudo', 'rm', '-f', '/usr/share/applications/battery-indicator.desktop'],
             ['rm', '-f', os.path.expanduser('~/.config/autostart/battery-indicator.desktop')],
             ['sudo', 'rm', '-f', '/usr/local/bin/battery-indicator'],
@@ -615,7 +626,9 @@ class BatteryIndicator:
                 if result.returncode != 0 and 'sudo' in cmd:
                     # Try with pkexec for graphical sudo
                     pkexec_cmd = ['pkexec'] + cmd[1:]  # Remove sudo, add pkexec
-                    subprocess.run(pkexec_cmd, capture_output=True, timeout=30)
+                    pkexec_result = subprocess.run(pkexec_cmd, capture_output=True, timeout=30)
+                    if pkexec_result.returncode != 0:
+                        success = False
             except (subprocess.SubprocessError, FileNotFoundError):
                 success = False
 
