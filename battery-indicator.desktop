@@ -1,11 +1,25 @@
 [Desktop Entry]
+Version=1.1
 Type=Application
 Name=Battery Indicator
+GenericName=Battery Monitor
 Comment=System tray battery indicator for Linux
 Exec=python3 /opt/battery-indicator/battery_indicator.py
 Icon=battery
 Terminal=false
-Categories=Utility;System;Monitor;
-Keywords=battery;power;indicator;tray;
+Categories=Utility;System;Monitor;HardwareSettings;
+Keywords=battery;power;indicator;tray;monitor;energy;
 StartupNotify=false
+Actions=Refresh;Quit;
 X-GNOME-Autostart-enabled=true
+X-GNOME-UsesNotifications=true
+X-Ubuntu-Gettext-Domain=battery-indicator
+X-Desktop-File-Install-Version=0.26
+
+[Desktop Action Refresh]
+Name=Refresh Battery Status
+Exec=python3 /opt/battery-indicator/battery_indicator.py --refresh
+
+[Desktop Action Quit]
+Name=Quit
+Exec=pkill -f battery_indicator.py
