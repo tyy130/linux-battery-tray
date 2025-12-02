@@ -33,7 +33,7 @@ class BatteryIndicator:
         # Create the indicator
         self.indicator = AppIndicator3.Indicator.new(
             "battery-indicator",
-            "battery-missing",
+            "battery-missing-symbolic",
             AppIndicator3.IndicatorCategory.HARDWARE
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
@@ -197,13 +197,14 @@ class BatteryIndicator:
             status: Battery status string.
 
         Returns:
-            Icon name string for the system theme.
+            Icon name string for the system theme (using -symbolic suffix for
+            better system integration and animated icons).
         """
         if percentage is None:
-            return "battery-missing"
+            return "battery-missing-symbolic"
 
-        is_charging = status.lower() in ("charging", "full")
-        suffix = "-charging" if is_charging else ""
+        is_charging = status.lower() == "charging"
+        suffix = "-charging-symbolic" if is_charging else "-symbolic"
 
         if percentage >= config.BATTERY_FULL_THRESHOLD:
             return f"battery-full{suffix}"
@@ -214,7 +215,7 @@ class BatteryIndicator:
         elif percentage >= config.BATTERY_CAUTION_THRESHOLD:
             return f"battery-caution{suffix}"
         else:
-            return "battery-empty"
+            return "battery-empty-symbolic"
 
     def send_notification(self, title: str, message: str, urgency: str = "normal") -> None:
         """
@@ -272,6 +273,43 @@ class BatteryIndicator:
         else:
             self.last_notification_level = None
 
+    def _get_tooltip_text(self, percentage: Optional[int], status: str, time_remaining: str) -> str:
+        """
+        Generate tooltip text for the tray icon.
+
+        Args:
+            percentage: Battery percentage (0-100) or None.
+            status: Battery status string.
+            time_remaining: Time remaining string.
+
+        Returns:
+            Tooltip text describing the current battery status.
+        """
+        if percentage is None:
+            return "Battery not detected"
+
+        # Build a descriptive tooltip based on status
+        if status.lower() == "charging":
+            if "to full" in time_remaining.lower():
+                return f"Charging - {time_remaining}"
+            elif "calculating" in time_remaining.lower():
+                return f"Charging - {percentage}%"
+            else:
+                return f"Charging - {percentage}% ({time_remaining})"
+        elif status.lower() == "discharging":
+            if "remaining" in time_remaining.lower():
+                return f"Discharging - {time_remaining}"
+            elif "calculating" in time_remaining.lower():
+                return f"On battery - {percentage}%"
+            else:
+                return f"On battery - {percentage}% ({time_remaining})"
+        elif status.lower() == "full":
+            return "Fully charged"
+        elif status.lower() == "not charging":
+            return f"Not charging - {percentage}%"
+        else:
+            return f"Battery: {percentage}%"
+
     def update_battery_info(self) -> None:
         """Update all battery information and refresh the UI."""
         # Get current battery info
@@ -282,6 +320,10 @@ class BatteryIndicator:
         # Update icon
         icon_name = self.get_icon_name(percentage, status)
         self.indicator.set_icon(icon_name)
+
+        # Update tooltip with battery status
+        tooltip_text = self._get_tooltip_text(percentage, status, time_remaining)
+        self.indicator.set_title(tooltip_text)
 
         # Update label if configured
         if config.SHOW_PERCENTAGE_LABEL and percentage is not None:
