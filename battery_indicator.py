@@ -152,9 +152,16 @@ class BatteryIndicator:
         Returns:
             A string describing the time remaining, or "Unknown" if unavailable.
         """
+        if not self.battery_path:
+            return "Unknown"
+
+        # Extract battery name from path (e.g., BAT0 from /sys/class/power_supply/BAT0)
+        battery_name = os.path.basename(self.battery_path)
+        upower_device = f"/org/freedesktop/UPower/devices/battery_{battery_name}"
+
         try:
             result = subprocess.run(
-                ["upower", "-i", "/org/freedesktop/UPower/devices/battery_BAT0"],
+                ["upower", "-i", upower_device],
                 capture_output=True,
                 text=True,
                 timeout=5

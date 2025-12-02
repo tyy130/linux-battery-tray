@@ -38,7 +38,7 @@ A lightweight, reliable system tray battery indicator for Linux using Python and
 ### Quick Install (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/linux-battery-tray.git
+git clone https://github.com/tyy130/linux-battery-tray.git
 cd linux-battery-tray
 chmod +x install.sh
 ./install.sh
@@ -52,7 +52,7 @@ sudo apt update
 sudo apt install python3 python3-gi gir1.2-appindicator3-0.1 gir1.2-gtk-3.0 upower libnotify-bin
 
 # Clone and install
-git clone https://github.com/yourusername/linux-battery-tray.git
+git clone https://github.com/tyy130/linux-battery-tray.git
 cd linux-battery-tray
 ./install.sh
 ```
@@ -64,7 +64,7 @@ cd linux-battery-tray
 sudo dnf install python3 python3-gobject libappindicator-gtk3 gtk3 upower libnotify
 
 # Clone and install
-git clone https://github.com/yourusername/linux-battery-tray.git
+git clone https://github.com/tyy130/linux-battery-tray.git
 cd linux-battery-tray
 ./install.sh
 ```
@@ -76,7 +76,7 @@ cd linux-battery-tray
 sudo pacman -S python python-gobject libappindicator-gtk3 gtk3 upower libnotify
 
 # Clone and install
-git clone https://github.com/yourusername/linux-battery-tray.git
+git clone https://github.com/tyy130/linux-battery-tray.git
 cd linux-battery-tray
 ./install.sh
 ```
