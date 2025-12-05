@@ -131,6 +131,16 @@ Click on the tray icon to see:
 - **Refresh** - Manually update battery information
 - **Quit** - Close the application
 
+## Quick Settings & Power Modes
+
+The tray menu includes a "Quick Settings" submenu with the following options:
+
+- **Battery Saver**: A quick toggle that immediately switches to the Power Saver profile when active.
+- **Power Mode**: Presets (Performance, Balanced, Power Saver) that can be applied quickly. These use `powerprofilesctl` when available.
+- **Customize...**: Opens a dialog where you can edit per-mode values like brightness and dim behaviour; changes are saved to `~/.config/battery-indicator/presets.json`.
+
+If `powerprofilesctl` is not installed, Power Mode options will not function; brightness changes use `brightnessctl` when available.
+
 ## Configuration
 
 Edit `config.py` to customize the behavior:
@@ -151,6 +161,12 @@ BATTERY_FULL_THRESHOLD = 80     # >= this = full icon
 BATTERY_GOOD_THRESHOLD = 50     # >= this = good icon
 BATTERY_LOW_THRESHOLD = 20      # >= this = low icon
 BATTERY_CAUTION_THRESHOLD = 10  # >= this = caution icon
+
+# Advanced behavior
+TIME_SMOOTHING_WINDOW = 5     # Number of upower samples used to smooth estimates
+HEALTH_WARNING_THRESHOLD = 40  # Percentage that triggers a battery health warning dialog
+LOW_BATTERY_UPDATE_INTERVAL = 10  # Update interval in seconds when battery is low
+DEFAULT_POWER_MODE = "Balanced"  # Default power mode to switch to when not in battery saver
 ```
 
 ## Troubleshooting
