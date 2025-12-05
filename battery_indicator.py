@@ -207,7 +207,7 @@ class BatteryIndicator:
         # Create the indicator with custom icon path
         self.indicator = AppIndicator3.Indicator.new(
             "battery-indicator",
-            "battery-missing",
+            "bat-ind-missing",
             AppIndicator3.IndicatorCategory.HARDWARE
         )
         
@@ -370,7 +370,7 @@ class BatteryIndicator:
         
         # Create header icon - use custom icon if available
         self.header_icon = Gtk.Image()
-        self._update_header_icon("battery-100")  # Will be updated by update_battery_info
+        self._update_header_icon("bat-ind-100")  # Will be updated by update_battery_info
         title_row.pack_start(self.header_icon, False, False, 0)
         
         self.header_label = Gtk.Label(label="Battery at ---%")
@@ -675,26 +675,26 @@ class BatteryIndicator:
             Icon name string (custom or system theme).
         """
         if percentage is None:
-            return "battery-missing" if self.icons_path else "battery-missing-symbolic"
+            return "bat-ind-missing" if self.icons_path else "battery-missing-symbolic"
 
         is_charging = status.lower() == "charging"
         
-        # If we have custom icons, use them
+        # If we have custom icons, use them (unique names to avoid system icon conflicts)
         if self.icons_path:
             if is_charging:
-                return "battery-charging"
+                return "bat-ind-charging"
             elif percentage >= 80:
-                return "battery-100"
+                return "bat-ind-100"
             elif percentage >= 60:
-                return "battery-80"
+                return "bat-ind-80"
             elif percentage >= 40:
-                return "battery-60"
+                return "bat-ind-60"
             elif percentage >= 20:
-                return "battery-40"
+                return "bat-ind-40"
             elif percentage > 5:
-                return "battery-20"
+                return "bat-ind-20"
             else:
-                return "battery-empty"
+                return "bat-ind-empty"
         
         # Fall back to system icons
         suffix = "-charging-symbolic" if is_charging else "-symbolic"
@@ -1483,7 +1483,7 @@ class BatteryIndicator:
         
         # Use our custom icon if available
         if self.icons_path:
-            icon_path = os.path.join(self.icons_path, "battery-100.svg")
+            icon_path = os.path.join(self.icons_path, "bat-ind-100.svg")
             if os.path.exists(icon_path):
                 try:
                     from gi.repository import GdkPixbuf
