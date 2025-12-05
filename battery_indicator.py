@@ -29,10 +29,12 @@ MENU_CSS = """
 }
 .battery-status {
     padding: 4px 12px;
+    font-size: 0.95em;
 }
 .battery-time {
     padding: 4px 12px;
     font-size: 0.9em;
+    opacity: 0.8;
 }
 .battery-progress {
     min-height: 10px;
@@ -47,6 +49,40 @@ MENU_CSS = """
 .battery-progress progress {
     min-height: 10px;
     border-radius: 5px;
+}
+
+/* Power Manager Dialog Styles */
+.power-manager-header {
+    font-size: 1.4em;
+    font-weight: bold;
+    padding: 12px;
+}
+.power-manager-percentage {
+    font-size: 3em;
+    font-weight: 300;
+}
+.power-manager-status {
+    font-size: 1.1em;
+    opacity: 0.8;
+}
+.power-manager-detail-label {
+    opacity: 0.7;
+}
+.power-manager-detail-value {
+    font-weight: 500;
+}
+.battery-level-bar {
+    min-height: 24px;
+    border-radius: 12px;
+}
+.battery-level-bar trough {
+    min-height: 24px;
+    border-radius: 12px;
+    background-color: alpha(currentColor, 0.15);
+}
+.battery-level-bar progress {
+    min-height: 24px;
+    border-radius: 12px;
 }
 """
 
@@ -115,10 +151,10 @@ class BatteryIndicator:
         """
         menu = Gtk.Menu()
 
-        # Battery percentage header (e.g., "Battery is at 77%")
+        # Battery percentage header
         self.header_item = Gtk.MenuItem()
         header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.header_label = Gtk.Label(label="Battery is at ---%")
+        self.header_label = Gtk.Label(label="---%")
         self.header_label.set_halign(Gtk.Align.START)
         self.header_label.get_style_context().add_class("battery-header")
         header_box.pack_start(self.header_label, False, False, 0)
@@ -129,10 +165,9 @@ class BatteryIndicator:
         # Status item with accent color support
         self.status_item = Gtk.MenuItem()
         status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.status_label = Gtk.Label(label="Status: Unknown")
+        self.status_label = Gtk.Label(label="Unknown")
         self.status_label.set_halign(Gtk.Align.START)
         self.status_label.get_style_context().add_class("battery-status")
-        # Use suggested-action class for accent color on charging status
         status_box.pack_start(self.status_label, False, False, 0)
         self.status_item.add(status_box)
         self.status_item.set_sensitive(False)
@@ -152,7 +187,7 @@ class BatteryIndicator:
         # Time remaining item
         self.time_item = Gtk.MenuItem()
         time_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.time_label = Gtk.Label(label="Calculating...")
+        self.time_label = Gtk.Label(label="Estimating...")
         self.time_label.set_halign(Gtk.Align.START)
         self.time_label.get_style_context().add_class("battery-time")
         time_box.pack_start(self.time_label, False, False, 0)
@@ -163,15 +198,10 @@ class BatteryIndicator:
         # Separator
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Power Settings button
-        power_settings_item = Gtk.MenuItem(label="Power Settings")
-        power_settings_item.connect("activate", self._on_power_settings_clicked)
-        menu.append(power_settings_item)
-
-        # Refresh button
-        refresh_item = Gtk.MenuItem(label="Refresh")
-        refresh_item.connect("activate", self._on_refresh_clicked)
-        menu.append(refresh_item)
+        # Power Manager button (opens our custom dialog)
+        power_item = Gtk.MenuItem(label="Power…")
+        power_item.connect("activate", self._on_power_settings_clicked)
+        menu.append(power_item)
 
         # Separator before system actions
         menu.append(Gtk.SeparatorMenuItem())
@@ -260,22 +290,64 @@ class BatteryIndicator:
             # Try to get time to empty or time to full
             for line in output.split('\n'):
                 if 'time to empty' in line.lower():
-                    parts = line.split(':')
+                    parts = line.split(':', 1)
                     if len(parts) >= 2:
-                        return f"{parts[1].strip()} remaining"
+                        time_str = self._format_time_string(parts[1].strip())
+                        return (time_str, "remaining")
                 elif 'time to full' in line.lower():
-                    parts = line.split(':')
+                    parts = line.split(':', 1)
                     if len(parts) >= 2:
-                        return f"{parts[1].strip()} to full"
+                        time_str = self._format_time_string(parts[1].strip())
+                        return (time_str, "until full")
 
             # If no time info found, return status
             status = self.get_battery_status()
             if status == "Full":
-                return "Fully charged"
-            return "Calculating..."
+                return ("Fully Charged", "status")
+            return ("Estimating...", "status")
 
         except (subprocess.SubprocessError, FileNotFoundError):
-            return "Unknown"
+            return ("Unknown", "status")
+
+    def _format_time_string(self, time_str: str) -> str:
+        """
+        Convert upower time format to human-readable format.
+        Converts '2.5 hours' to '2 hr 30 min', '45 minutes' to '45 min', etc.
+
+        Args:
+            time_str: Raw time string from upower.
+
+        Returns:
+            Formatted time string.
+        """
+        time_str = time_str.strip().lower()
+        
+        # Handle 'X.Y hours' format
+        if 'hour' in time_str:
+            try:
+                # Extract the number
+                num = float(time_str.split()[0])
+                hours = int(num)
+                minutes = int((num - hours) * 60)
+                
+                if hours > 0 and minutes > 0:
+                    return f"{hours} hr {minutes} min"
+                elif hours > 0:
+                    return f"{hours} hr"
+                else:
+                    return f"{minutes} min"
+            except (ValueError, IndexError):
+                return time_str
+        
+        # Handle 'X.Y minutes' or 'X minutes' format
+        elif 'minute' in time_str:
+            try:
+                num = float(time_str.split()[0])
+                return f"{int(num)} min"
+            except (ValueError, IndexError):
+                return time_str
+        
+        return time_str
 
     def get_icon_name(self, percentage: Optional[int], status: str) -> str:
         """
@@ -362,89 +434,90 @@ class BatteryIndicator:
         else:
             self.last_notification_level = None
 
-    def _get_tooltip_text(self, percentage: Optional[int], status: str, time_remaining: str) -> str:
+    def _get_tooltip_text(self, percentage: Optional[int], status: str, time_info: Tuple[str, str]) -> str:
         """
         Generate tooltip text for the tray icon.
 
         Args:
             percentage: Battery percentage (0-100) or None.
             status: Battery status string.
-            time_remaining: Time remaining string.
+            time_info: Tuple of (time_string, time_type).
 
         Returns:
             Tooltip text describing the current battery status.
         """
         if percentage is None:
-            return "Battery not detected"
+            return "Battery Not Detected"
 
-        # Build a descriptive tooltip based on status
-        if status.lower() == "charging":
-            if "to full" in time_remaining.lower():
-                return f"Charging - {time_remaining}"
-            elif "calculating" in time_remaining.lower():
-                return f"Charging - {percentage}%"
+        time_str, time_type = time_info
+        status_lower = status.lower()
+
+        if status_lower == "charging":
+            if time_type == "until full":
+                return f"{time_str} Until Full ({percentage}%)"
             else:
-                return f"Charging - {percentage}% ({time_remaining})"
-        elif status.lower() == "discharging":
-            if "remaining" in time_remaining.lower():
-                return f"Discharging - {time_remaining}"
-            elif "calculating" in time_remaining.lower():
-                return f"On battery - {percentage}%"
+                return f"Charging ({percentage}%)"
+        elif status_lower == "discharging":
+            if time_type == "remaining":
+                return f"{time_str} Remaining ({percentage}%)"
             else:
-                return f"On battery - {percentage}% ({time_remaining})"
-        elif status.lower() == "full":
-            return "Fully charged"
-        elif status.lower() == "not charging":
-            return f"Not charging - {percentage}%"
+                return f"{percentage}% Remaining"
+        elif status_lower == "full":
+            return "Fully Charged"
+        elif status_lower == "not charging":
+            return f"Not Charging ({percentage}%)"
         else:
-            return f"Battery: {percentage}%"
+            return f"Battery {percentage}%"
 
-    def _format_time_display(self, status: str, time_remaining: str) -> str:
+    def _format_time_display(self, status: str, time_info: Tuple[str, str]) -> str:
         """
         Format the time remaining for display in the menu.
 
         Args:
             status: Battery status string.
-            time_remaining: Raw time remaining string.
+            time_info: Tuple of (time_string, time_type).
 
         Returns:
             Formatted time string for display.
         """
+        time_str, time_type = time_info
         status_lower = status.lower()
+
         if status_lower == "charging":
-            if "to full" in time_remaining.lower():
-                return f"Charging - {time_remaining}"
-            elif "calculating" in time_remaining.lower():
-                return "Charging - Calculating time..."
+            if time_type == "until full":
+                return f"{time_str} until full"
             else:
-                return f"Charging - {time_remaining}"
+                return "Estimating..."
         elif status_lower == "discharging":
-            if "remaining" in time_remaining.lower():
-                return time_remaining
-            elif "calculating" in time_remaining.lower():
-                return "Calculating time remaining..."
+            if time_type == "remaining":
+                return f"{time_str} remaining"
             else:
-                return time_remaining
+                return "Estimating..."
         elif status_lower == "full":
-            return "Fully charged"
+            return "Fully Charged"
         elif status_lower == "not charging":
-            return "Not charging"
+            return "Plugged in, not charging"
         else:
-            return time_remaining
+            return time_str
 
     def update_battery_info(self) -> None:
         """Update all battery information and refresh the UI."""
         # Get current battery info
         percentage = self.get_battery_percentage()
         status = self.get_battery_status()
-        time_remaining = self.get_time_remaining()
+        time_info = self.get_time_remaining()
+
+        # Store for power manager dialog
+        self._current_percentage = percentage
+        self._current_status = status
+        self._current_time_info = time_info
 
         # Update icon
         icon_name = self.get_icon_name(percentage, status)
         self.indicator.set_icon(icon_name)
 
         # Update tooltip with battery status
-        tooltip_text = self._get_tooltip_text(percentage, status, time_remaining)
+        tooltip_text = self._get_tooltip_text(percentage, status, time_info)
         self.indicator.set_title(tooltip_text)
 
         # Update label if configured
@@ -455,10 +528,10 @@ class BatteryIndicator:
 
         # Update menu items with modern UI
         if percentage is not None:
-            self.header_label.set_text(f"Battery is at {percentage}%")
+            self.header_label.set_text(f"{percentage}%")
             self.progress_bar.set_fraction(percentage / 100.0)
         else:
-            self.header_label.set_text("Battery not detected")
+            self.header_label.set_text("Battery Not Detected")
             self.progress_bar.set_fraction(0.0)
 
         # Update status with accent color for charging
@@ -470,7 +543,6 @@ class BatteryIndicator:
 
         if status_lower == "charging":
             self.status_label.set_text("Charging")
-            # Add accent color class for charging status
             style_context.add_class("suggested-action")
         elif status_lower == "discharging":
             self.status_label.set_text("On Battery")
@@ -478,12 +550,12 @@ class BatteryIndicator:
             self.status_label.set_text("Fully Charged")
             style_context.add_class("suggested-action")
         elif status_lower == "not charging":
-            self.status_label.set_text("Not Charging")
+            self.status_label.set_text("Plugged In")
         else:
             self.status_label.set_text(status)
 
         # Update time display
-        time_display = self._format_time_display(status, time_remaining)
+        time_display = self._format_time_display(status, time_info)
         self.time_label.set_text(time_display)
 
         # Check for low battery warnings
@@ -527,10 +599,191 @@ class BatteryIndicator:
             return 'unknown'
 
     def _on_power_settings_clicked(self, widget: Gtk.MenuItem) -> None:
-        """Handle power settings button click - opens system power settings."""
+        """Handle power settings button click - opens our power manager dialog."""
+        self._show_power_manager()
+
+    def _show_power_manager(self) -> None:
+        """Show the power manager dialog with detailed battery information."""
+        # Create the dialog window
+        dialog = Gtk.Dialog(
+            title="Power",
+            transient_for=None,
+            flags=0
+        )
+        dialog.set_default_size(380, 420)
+        dialog.set_resizable(False)
+        
+        # Get the content area
+        content = dialog.get_content_area()
+        content.set_spacing(0)
+        content.set_margin_start(24)
+        content.set_margin_end(24)
+        content.set_margin_top(20)
+        content.set_margin_bottom(20)
+
+        # Main container
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        content.pack_start(main_box, True, True, 0)
+
+        # Battery icon and percentage section
+        battery_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        battery_section.set_halign(Gtk.Align.CENTER)
+        
+        # Large battery icon
+        percentage = getattr(self, '_current_percentage', None)
+        status = getattr(self, '_current_status', 'Unknown')
+        icon_name = self.get_icon_name(percentage, status)
+        battery_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.DIALOG)
+        battery_icon.set_pixel_size(64)
+        battery_section.pack_start(battery_icon, False, False, 0)
+
+        # Large percentage text
+        if percentage is not None:
+            pct_label = Gtk.Label(label=f"{percentage}%")
+        else:
+            pct_label = Gtk.Label(label="---%")
+        pct_label.get_style_context().add_class("power-manager-percentage")
+        battery_section.pack_start(pct_label, False, False, 0)
+
+        # Status text
+        status_text = self._get_status_text(status)
+        status_label = Gtk.Label(label=status_text)
+        status_label.get_style_context().add_class("power-manager-status")
+        battery_section.pack_start(status_label, False, False, 0)
+
+        main_box.pack_start(battery_section, False, False, 8)
+
+        # Large progress bar
+        level_bar = Gtk.ProgressBar()
+        if percentage is not None:
+            level_bar.set_fraction(percentage / 100.0)
+        level_bar.get_style_context().add_class("battery-level-bar")
+        main_box.pack_start(level_bar, False, False, 8)
+
+        # Time remaining section
+        time_info = getattr(self, '_current_time_info', ('Unknown', 'status'))
+        time_str, time_type = time_info
+        
+        if time_type in ("remaining", "until full"):
+            time_section = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            time_section.set_halign(Gtk.Align.CENTER)
+            
+            time_icon = Gtk.Image.new_from_icon_name("appointment-soon-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+            time_section.pack_start(time_icon, False, False, 0)
+            
+            if time_type == "remaining":
+                time_text = f"{time_str} remaining"
+            else:
+                time_text = f"{time_str} until full"
+            
+            time_label = Gtk.Label(label=time_text)
+            time_section.pack_start(time_label, False, False, 0)
+            main_box.pack_start(time_section, False, False, 4)
+
+        # Separator
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        separator.set_margin_top(8)
+        separator.set_margin_bottom(8)
+        main_box.pack_start(separator, False, False, 0)
+
+        # Details section
+        details_grid = Gtk.Grid()
+        details_grid.set_row_spacing(8)
+        details_grid.set_column_spacing(16)
+        details_grid.set_halign(Gtk.Align.CENTER)
+
+        row = 0
+        
+        # Battery health/energy info from sysfs
+        energy_full = self._read_battery_file("energy_full")
+        energy_full_design = self._read_battery_file("energy_full_design")
+        energy_now = self._read_battery_file("energy_now")
+        power_now = self._read_battery_file("power_now")
+        voltage_now = self._read_battery_file("voltage_now")
+        
+        if energy_full and energy_full_design:
+            try:
+                health = int(int(energy_full) / int(energy_full_design) * 100)
+                self._add_detail_row(details_grid, row, "Battery Health", f"{health}%")
+                row += 1
+            except (ValueError, ZeroDivisionError):
+                pass
+
+        if energy_now:
+            try:
+                energy_wh = int(energy_now) / 1000000
+                self._add_detail_row(details_grid, row, "Energy", f"{energy_wh:.1f} Wh")
+                row += 1
+            except ValueError:
+                pass
+
+        if power_now:
+            try:
+                power_w = int(power_now) / 1000000
+                self._add_detail_row(details_grid, row, "Power Draw", f"{power_w:.1f} W")
+                row += 1
+            except ValueError:
+                pass
+
+        if voltage_now:
+            try:
+                voltage_v = int(voltage_now) / 1000000
+                self._add_detail_row(details_grid, row, "Voltage", f"{voltage_v:.2f} V")
+                row += 1
+            except ValueError:
+                pass
+
+        main_box.pack_start(details_grid, False, False, 0)
+
+        # Button box
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        button_box.set_halign(Gtk.Align.CENTER)
+        button_box.set_margin_top(16)
+
+        # System Settings button
+        settings_btn = Gtk.Button(label="System Settings")
+        settings_btn.connect("clicked", self._on_system_settings_clicked)
+        button_box.pack_start(settings_btn, False, False, 0)
+
+        # Close button
+        close_btn = Gtk.Button(label="Close")
+        close_btn.connect("clicked", lambda w: dialog.destroy())
+        button_box.pack_start(close_btn, False, False, 0)
+
+        main_box.pack_start(button_box, False, False, 0)
+
+        dialog.show_all()
+
+    def _add_detail_row(self, grid: Gtk.Grid, row: int, label: str, value: str) -> None:
+        """Add a detail row to the grid."""
+        label_widget = Gtk.Label(label=label)
+        label_widget.set_halign(Gtk.Align.END)
+        label_widget.get_style_context().add_class("power-manager-detail-label")
+        grid.attach(label_widget, 0, row, 1, 1)
+
+        value_widget = Gtk.Label(label=value)
+        value_widget.set_halign(Gtk.Align.START)
+        value_widget.get_style_context().add_class("power-manager-detail-value")
+        grid.attach(value_widget, 1, row, 1, 1)
+
+    def _get_status_text(self, status: str) -> str:
+        """Get human-readable status text."""
+        status_lower = status.lower()
+        if status_lower == "charging":
+            return "Charging"
+        elif status_lower == "discharging":
+            return "On Battery Power"
+        elif status_lower == "full":
+            return "Fully Charged"
+        elif status_lower == "not charging":
+            return "Plugged In, Not Charging"
+        else:
+            return status
+
+    def _on_system_settings_clicked(self, widget: Gtk.Button) -> None:
+        """Open system power settings."""
         desktop = self._detect_desktop_environment()
 
-        # Desktop-specific power settings commands
         commands = {
             'gnome': ['gnome-control-center', 'power'],
             'kde': ['systemsettings', 'kcm_powerdevilprofilesconfig'],
@@ -539,7 +792,6 @@ class BatteryIndicator:
             'mate': ['mate-power-preferences'],
         }
 
-        # Fallback commands to try
         fallbacks = [
             ['gnome-control-center', 'power'],
             ['systemsettings', 'kcm_powerdevilprofilesconfig'],
@@ -548,7 +800,6 @@ class BatteryIndicator:
             ['mate-power-preferences'],
         ]
 
-        # Try desktop-specific command first
         if desktop in commands:
             try:
                 subprocess.Popen(commands[desktop], start_new_session=True)
@@ -556,7 +807,6 @@ class BatteryIndicator:
             except (FileNotFoundError, OSError):
                 pass
 
-        # Try fallback commands
         for cmd in fallbacks:
             try:
                 subprocess.Popen(cmd, start_new_session=True)
@@ -564,10 +814,9 @@ class BatteryIndicator:
             except (FileNotFoundError, OSError):
                 continue
 
-        # If all else fails, show an error notification
         self.send_notification(
             "Power Settings",
-            "Could not open power settings. Please open it manually from your system settings.",
+            "Could not open system power settings.",
             "normal"
         )
 
