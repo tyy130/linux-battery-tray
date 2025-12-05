@@ -360,7 +360,10 @@ class BatteryIndicator:
         
         # Title row: [icon] Battery at XX%
         title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        self.header_icon = Gtk.Image.new_from_icon_name("battery-full-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
+        
+        # Create header icon - use custom icon if available
+        self.header_icon = Gtk.Image()
+        self._update_header_icon("battery-100")  # Will be updated by update_battery_info
         title_row.pack_start(self.header_icon, False, False, 0)
         
         self.header_label = Gtk.Label(label="Battery at ---%")
@@ -554,6 +557,21 @@ class BatteryIndicator:
 
         menu.show_all()
         return menu
+
+    def _update_header_icon(self, icon_name: str) -> None:
+        """Update the header icon in the menu using custom SVG if available."""
+        if self.icons_path:
+            icon_path = os.path.join(self.icons_path, f"{icon_name}.svg")
+            if os.path.exists(icon_path):
+                try:
+                    from gi.repository import GdkPixbuf
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_path, 24, 24)
+                    self.header_icon.set_from_pixbuf(pixbuf)
+                    return
+                except Exception:
+                    pass
+        # Fallback to system icon
+        self.header_icon.set_from_icon_name("battery-full-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
 
     def _on_brightness_changed_with_label(self, scale: Gtk.Scale, max_brightness: int) -> None:
         """Handle brightness slider change and update label."""
@@ -920,8 +938,8 @@ class BatteryIndicator:
         # ═══════════════════════════════════════════════════════════════
         status_lower = status.lower()
         
-        # Update header icon to match battery level
-        self.header_icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        # Update header icon to match battery level (use custom icon)
+        self._update_header_icon(icon_name)
         
         # Update header label: "Battery at XX%"
         if percentage is not None:
@@ -1299,11 +1317,27 @@ class BatteryIndicator:
         """Handle about button click."""
         about = Gtk.AboutDialog()
         about.set_program_name("Battery Indicator")
-        about.set_version("1.0.0")
+        about.set_version("1.1.0")
         about.set_comments("A lightweight system tray battery indicator for Linux.")
         about.set_website("https://github.com/tyy130/linux-battery-tray")
-        about.set_authors(["tyy130"])
-        about.set_logo_icon_name("battery-full-symbolic")
+        about.set_authors(["TacticDev", "Tyler Hill"])
+        about.set_copyright("© 2025 TacticDev")
+        
+        # Use our custom icon if available
+        if self.icons_path:
+            icon_path = os.path.join(self.icons_path, "battery-100.svg")
+            if os.path.exists(icon_path):
+                try:
+                    from gi.repository import GdkPixbuf
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_path, 64, 64)
+                    about.set_logo(pixbuf)
+                except Exception:
+                    about.set_logo_icon_name("battery-full-symbolic")
+            else:
+                about.set_logo_icon_name("battery-full-symbolic")
+        else:
+            about.set_logo_icon_name("battery-full-symbolic")
+        
         about.set_license_type(Gtk.License.MIT_X11)
         about.run()
         about.destroy()
