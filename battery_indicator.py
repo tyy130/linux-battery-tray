@@ -190,6 +190,13 @@ class BatteryIndicator:
         self.battery_health_warned: bool = False
         self.update_source_id: Optional[int] = None
         self.current_update_interval: int = config.UPDATE_INTERVAL
+        
+        # Power profile auto-switching settings
+        self.auto_performance_on_ac: bool = False
+        self.auto_saver_on_battery: bool = False
+        self.offer_saver_on_low: bool = True
+        self.saver_offered_this_session: bool = False
+        self.last_ac_status: Optional[bool] = None
 
         # Find custom icons path
         self.icons_path: Optional[str] = self._find_icons_path()
@@ -419,53 +426,6 @@ class BatteryIndicator:
         menu.append(Gtk.SeparatorMenuItem())
 
         # ═══════════════════════════════════════════════════════════════
-        # CONTROLS SECTION - Brightness slider with value display
-        # ═══════════════════════════════════════════════════════════════
-        brightness_info = self._get_brightness()
-        if brightness_info:
-            current_brightness, max_brightness = brightness_info
-            brightness_percent = int((current_brightness / max_brightness) * 100)
-            
-            brightness_item = Gtk.MenuItem()
-            brightness_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            brightness_box.set_margin_start(8)
-            brightness_box.set_margin_end(8)
-            brightness_box.set_margin_top(4)
-            brightness_box.set_margin_bottom(4)
-            brightness_box.get_style_context().add_class("slider-row")
-            
-            # Sun icon
-            sun_icon = Gtk.Image.new_from_icon_name("display-brightness-symbolic", Gtk.IconSize.MENU)
-            brightness_box.pack_start(sun_icon, False, False, 0)
-            
-            # Slider
-            self.brightness_scale = Gtk.Scale.new_with_range(
-                Gtk.Orientation.HORIZONTAL, 
-                1, max_brightness, max_brightness / 100
-            )
-            self.brightness_scale.set_value(current_brightness)
-            self.brightness_scale.set_draw_value(False)
-            self.brightness_scale.set_hexpand(True)
-            self.brightness_scale.set_size_request(140, -1)
-            self.brightness_scale.get_style_context().add_class("slider-control")
-            
-            # Value label
-            self.brightness_value_label = Gtk.Label(label=f"{brightness_percent}%")
-            self.brightness_value_label.get_style_context().add_class("slider-value")
-            self.brightness_value_label.set_width_chars(4)
-            
-            # Connect after creating value label
-            self.brightness_scale.connect("value-changed", self._on_brightness_changed_with_label, max_brightness)
-            
-            brightness_box.pack_start(self.brightness_scale, True, True, 0)
-            brightness_box.pack_end(self.brightness_value_label, False, False, 0)
-            
-            brightness_item.add(brightness_box)
-            menu.append(brightness_item)
-            
-            menu.append(Gtk.SeparatorMenuItem())
-
-        # ═══════════════════════════════════════════════════════════════
         # POWER MODE - With visual indicator of current mode
         # ═══════════════════════════════════════════════════════════════
         mode_item = Gtk.MenuItem()
@@ -572,13 +532,6 @@ class BatteryIndicator:
                     pass
         # Fallback to system icon
         self.header_icon.set_from_icon_name("battery-full-symbolic", Gtk.IconSize.LARGE_TOOLBAR)
-
-    def _on_brightness_changed_with_label(self, scale: Gtk.Scale, max_brightness: int) -> None:
-        """Handle brightness slider change and update label."""
-        value = int(scale.get_value())
-        percent = int((value / max_brightness) * 100)
-        self.brightness_value_label.set_text(f"{percent}%")
-        self._set_brightness(value)
 
     def _read_battery_file(self, filename: str) -> Optional[str]:
         """
@@ -794,6 +747,7 @@ class BatteryIndicator:
     def check_low_battery(self, percentage: Optional[int], status: str) -> None:
         """
         Check if battery is low and send notifications as needed.
+        Also handles automatic power profile switching.
 
         Args:
             percentage: Current battery percentage.
@@ -802,9 +756,33 @@ class BatteryIndicator:
         if percentage is None:
             return
 
-        # Don't notify if charging
-        if status.lower() in ("charging", "full"):
+        status_lower = status.lower()
+        is_on_ac = status_lower in ("charging", "full", "not charging")
+        
+        # Handle automatic power profile switching
+        if self._check_power_profiles_support():
+            # Check if AC status changed
+            if self.last_ac_status is not None and self.last_ac_status != is_on_ac:
+                if is_on_ac and self.auto_performance_on_ac:
+                    self._set_power_profile("performance")
+                    self.send_notification(
+                        "Power Profile Changed",
+                        "Switched to Performance mode (plugged in)",
+                        "low"
+                    )
+                elif not is_on_ac and self.auto_saver_on_battery:
+                    self._set_power_profile("power-saver")
+                    self.send_notification(
+                        "Power Profile Changed", 
+                        "Switched to Power Saver mode (on battery)",
+                        "low"
+                    )
+            self.last_ac_status = is_on_ac
+
+        # Don't send low battery notifications if charging
+        if is_on_ac:
             self.last_notification_level = None
+            self.saver_offered_this_session = False
             return
 
         # Critical battery warning
@@ -817,14 +795,36 @@ class BatteryIndicator:
                 )
                 self.last_notification_level = config.CRITICAL_BATTERY_THRESHOLD
 
-        # Low battery warning
+        # Low battery warning with power saver offer
         elif percentage <= config.LOW_BATTERY_THRESHOLD:
             if self.last_notification_level != config.LOW_BATTERY_THRESHOLD:
-                self.send_notification(
-                    "Low Battery",
-                    f"Battery at {percentage}%. Consider plugging in.",
-                    "normal"
-                )
+                # Offer to switch to power saver if enabled and not already offered
+                if (self.offer_saver_on_low and 
+                    not self.saver_offered_this_session and 
+                    self._check_power_profiles_support()):
+                    current_profile = self._get_power_profile()
+                    if current_profile != "power-saver":
+                        self.send_notification(
+                            "Low Battery",
+                            f"Battery at {percentage}%. Switch to Power Saver mode?",
+                            "normal"
+                        )
+                        self.saver_offered_this_session = True
+                        # Auto-switch if auto_saver_on_battery is enabled
+                        if self.auto_saver_on_battery:
+                            self._set_power_profile("power-saver")
+                    else:
+                        self.send_notification(
+                            "Low Battery",
+                            f"Battery at {percentage}%. Consider plugging in.",
+                            "normal"
+                        )
+                else:
+                    self.send_notification(
+                        "Low Battery",
+                        f"Battery at {percentage}%. Consider plugging in.",
+                        "normal"
+                    )
                 self.last_notification_level = config.LOW_BATTERY_THRESHOLD
 
         else:
@@ -1096,112 +1096,111 @@ class BatteryIndicator:
         self._show_power_manager()
 
     def _show_power_manager(self) -> None:
-        """Show the power manager dialog with detailed battery information."""
-        # Create the dialog window
+        """Show comprehensive power settings dialog."""
         dialog = Gtk.Dialog(
-            title="Power",
+            title="Power Settings",
             transient_for=None,
             flags=0
         )
-        dialog.set_default_size(380, 420)
+        dialog.set_default_size(420, 520)
         dialog.set_resizable(False)
         
-        # Get the content area
         content = dialog.get_content_area()
         content.set_spacing(0)
-        content.set_margin_start(24)
-        content.set_margin_end(24)
-        content.set_margin_top(20)
-        content.set_margin_bottom(20)
 
-        # Main container
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        content.pack_start(main_box, True, True, 0)
+        # Create notebook for tabs
+        notebook = Gtk.Notebook()
+        notebook.set_margin_start(12)
+        notebook.set_margin_end(12)
+        notebook.set_margin_top(12)
+        notebook.set_margin_bottom(12)
+        content.pack_start(notebook, True, True, 0)
 
-        # Battery icon and percentage section
-        battery_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        battery_section.set_halign(Gtk.Align.CENTER)
+        # ═══════════════════════════════════════════════════════════════
+        # TAB 1: Battery Status
+        # ═══════════════════════════════════════════════════════════════
+        status_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        status_page.set_margin_start(16)
+        status_page.set_margin_end(16)
+        status_page.set_margin_top(16)
+        status_page.set_margin_bottom(16)
+
+        # Battery icon and percentage
+        battery_header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        battery_header.set_halign(Gtk.Align.CENTER)
         
-        # Large battery icon
         percentage = getattr(self, '_current_percentage', None)
         status = getattr(self, '_current_status', 'Unknown')
+        
+        # Use our custom icon
         icon_name = self.get_icon_name(percentage, status)
-        battery_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.DIALOG)
-        battery_icon.set_pixel_size(64)
-        battery_section.pack_start(battery_icon, False, False, 0)
-
-        # Large percentage text
-        if percentage is not None:
-            pct_label = Gtk.Label(label=f"{percentage}%")
+        if self.icons_path:
+            icon_path = os.path.join(self.icons_path, f"{icon_name}.svg")
+            if os.path.exists(icon_path):
+                try:
+                    from gi.repository import GdkPixbuf
+                    pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_path, 64, 64)
+                    battery_icon = Gtk.Image.new_from_pixbuf(pixbuf)
+                except Exception:
+                    battery_icon = Gtk.Image.new_from_icon_name("battery-full-symbolic", Gtk.IconSize.DIALOG)
+            else:
+                battery_icon = Gtk.Image.new_from_icon_name("battery-full-symbolic", Gtk.IconSize.DIALOG)
         else:
-            pct_label = Gtk.Label(label="---%")
-        pct_label.get_style_context().add_class("power-manager-percentage")
-        battery_section.pack_start(pct_label, False, False, 0)
+            battery_icon = Gtk.Image.new_from_icon_name("battery-full-symbolic", Gtk.IconSize.DIALOG)
+        battery_icon.set_pixel_size(64)
+        battery_header.pack_start(battery_icon, False, False, 0)
 
-        # Status text
+        pct_label = Gtk.Label(label=f"{percentage}%" if percentage else "---%")
+        pct_label.get_style_context().add_class("power-manager-percentage")
+        battery_header.pack_start(pct_label, False, False, 0)
+
         status_text = self._get_status_text(status)
         status_label = Gtk.Label(label=status_text)
         status_label.get_style_context().add_class("power-manager-status")
-        battery_section.pack_start(status_label, False, False, 0)
+        battery_header.pack_start(status_label, False, False, 0)
 
-        main_box.pack_start(battery_section, False, False, 8)
+        status_page.pack_start(battery_header, False, False, 8)
 
-        # Large progress bar
+        # Progress bar
         level_bar = Gtk.ProgressBar()
-        if percentage is not None:
+        if percentage:
             level_bar.set_fraction(percentage / 100.0)
-        level_bar.get_style_context().add_class("battery-level-bar")
-        main_box.pack_start(level_bar, False, False, 8)
+        level_bar.get_style_context().add_class("dialog-level-bar")
+        status_page.pack_start(level_bar, False, False, 8)
 
-        # Time remaining section
+        # Time remaining
         time_info = getattr(self, '_current_time_info', ('Unknown', 'status'))
         time_str, time_type = time_info
-        
         if time_type in ("remaining", "until full"):
-            time_section = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            time_section.set_halign(Gtk.Align.CENTER)
-            
+            time_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            time_box.set_halign(Gtk.Align.CENTER)
             time_icon = Gtk.Image.new_from_icon_name("appointment-soon-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-            time_section.pack_start(time_icon, False, False, 0)
-            
-            if time_type == "remaining":
-                time_text = f"{time_str} remaining"
-            else:
-                time_text = f"{time_str} until full"
-            
+            time_box.pack_start(time_icon, False, False, 0)
+            time_text = f"{time_str} remaining" if time_type == "remaining" else f"{time_str} until full"
             time_label = Gtk.Label(label=time_text)
-            time_section.pack_start(time_label, False, False, 0)
-            main_box.pack_start(time_section, False, False, 4)
+            time_box.pack_start(time_label, False, False, 0)
+            status_page.pack_start(time_box, False, False, 4)
 
         # Separator
-        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        separator.set_margin_top(8)
-        separator.set_margin_bottom(8)
-        main_box.pack_start(separator, False, False, 0)
+        status_page.pack_start(Gtk.Separator(), False, False, 8)
 
-        # Details section
+        # Battery details grid
+        details_frame = Gtk.Frame(label="Battery Details")
         details_grid = Gtk.Grid()
         details_grid.set_row_spacing(8)
-        details_grid.set_column_spacing(16)
-        details_grid.set_halign(Gtk.Align.CENTER)
+        details_grid.set_column_spacing(24)
+        details_grid.set_margin_start(12)
+        details_grid.set_margin_end(12)
+        details_grid.set_margin_top(8)
+        details_grid.set_margin_bottom(8)
 
         row = 0
-        
-        # Battery health/energy info from sysfs
-        energy_full = self._read_battery_file("energy_full")
-        energy_full_design = self._read_battery_file("energy_full_design")
-        energy_now = self._read_battery_file("energy_now")
-        power_now = self._read_battery_file("power_now")
-        voltage_now = self._read_battery_file("voltage_now")
-        
-        if energy_full and energy_full_design:
-            try:
-                health = int(int(energy_full) / int(energy_full_design) * 100)
-                self._add_detail_row(details_grid, row, "Battery Health", f"{health}%")
-                row += 1
-            except (ValueError, ZeroDivisionError):
-                pass
+        health = self.get_battery_health()
+        if health:
+            self._add_detail_row(details_grid, row, "Battery Health", f"{health}%")
+            row += 1
 
+        energy_now = self._read_battery_file("energy_now")
         if energy_now:
             try:
                 energy_wh = int(energy_now) / 1000000
@@ -1210,6 +1209,7 @@ class BatteryIndicator:
             except ValueError:
                 pass
 
+        power_now = self._read_battery_file("power_now")
         if power_now:
             try:
                 power_w = int(power_now) / 1000000
@@ -1218,6 +1218,7 @@ class BatteryIndicator:
             except ValueError:
                 pass
 
+        voltage_now = self._read_battery_file("voltage_now")
         if voltage_now:
             try:
                 voltage_v = int(voltage_now) / 1000000
@@ -1226,26 +1227,183 @@ class BatteryIndicator:
             except ValueError:
                 pass
 
-        main_box.pack_start(details_grid, False, False, 0)
+        details_frame.add(details_grid)
+        status_page.pack_start(details_frame, False, False, 0)
 
-        # Button box
+        notebook.append_page(status_page, Gtk.Label(label="Status"))
+
+        # ═══════════════════════════════════════════════════════════════
+        # TAB 2: Power Profiles
+        # ═══════════════════════════════════════════════════════════════
+        profiles_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        profiles_page.set_margin_start(16)
+        profiles_page.set_margin_end(16)
+        profiles_page.set_margin_top(16)
+        profiles_page.set_margin_bottom(16)
+
+        # Current profile section
+        profile_frame = Gtk.Frame(label="Power Profile")
+        profile_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        profile_box.set_margin_start(12)
+        profile_box.set_margin_end(12)
+        profile_box.set_margin_top(8)
+        profile_box.set_margin_bottom(8)
+
+        if self._check_power_profiles_support():
+            current_profile = self._get_power_profile()
+            
+            # Performance
+            perf_radio = Gtk.RadioButton.new_with_label(None, "⚡ Performance")
+            perf_radio.set_tooltip_text("Maximum performance, higher power consumption")
+            if current_profile == "performance":
+                perf_radio.set_active(True)
+            perf_radio.connect("toggled", lambda w: self._set_power_profile("performance") if w.get_active() else None)
+            profile_box.pack_start(perf_radio, False, False, 4)
+            
+            # Balanced
+            bal_radio = Gtk.RadioButton.new_with_label_from_widget(perf_radio, "⚖ Balanced")
+            bal_radio.set_tooltip_text("Balance between performance and power saving")
+            if current_profile == "balanced":
+                bal_radio.set_active(True)
+            bal_radio.connect("toggled", lambda w: self._set_power_profile("balanced") if w.get_active() else None)
+            profile_box.pack_start(bal_radio, False, False, 4)
+            
+            # Power Saver
+            saver_radio = Gtk.RadioButton.new_with_label_from_widget(perf_radio, "🔋 Power Saver")
+            saver_radio.set_tooltip_text("Maximum battery life, reduced performance")
+            if current_profile == "power-saver":
+                saver_radio.set_active(True)
+            saver_radio.connect("toggled", lambda w: self._set_power_profile("power-saver") if w.get_active() else None)
+            profile_box.pack_start(saver_radio, False, False, 4)
+        else:
+            no_profiles_label = Gtk.Label(label="Power profiles not available.\nInstall power-profiles-daemon to enable.")
+            no_profiles_label.set_line_wrap(True)
+            profile_box.pack_start(no_profiles_label, False, False, 8)
+
+        profile_frame.add(profile_box)
+        profiles_page.pack_start(profile_frame, False, False, 0)
+
+        # Auto-switch settings
+        auto_frame = Gtk.Frame(label="Automatic Switching")
+        auto_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        auto_box.set_margin_start(12)
+        auto_box.set_margin_end(12)
+        auto_box.set_margin_top(8)
+        auto_box.set_margin_bottom(8)
+
+        # Performance when plugged in
+        self.auto_perf_check = Gtk.CheckButton(label="Switch to Performance when plugged in")
+        self.auto_perf_check.set_active(getattr(self, 'auto_performance_on_ac', False))
+        self.auto_perf_check.connect("toggled", self._on_auto_perf_toggled)
+        auto_box.pack_start(self.auto_perf_check, False, False, 4)
+
+        # Power saver when on battery
+        self.auto_saver_check = Gtk.CheckButton(label="Switch to Power Saver on battery")
+        self.auto_saver_check.set_active(getattr(self, 'auto_saver_on_battery', False))
+        self.auto_saver_check.connect("toggled", self._on_auto_saver_toggled)
+        auto_box.pack_start(self.auto_saver_check, False, False, 4)
+
+        # Low battery power saver notification
+        self.low_battery_saver_check = Gtk.CheckButton(label="Offer Power Saver when battery is low")
+        self.low_battery_saver_check.set_active(getattr(self, 'offer_saver_on_low', True))
+        self.low_battery_saver_check.connect("toggled", self._on_offer_saver_toggled)
+        auto_box.pack_start(self.low_battery_saver_check, False, False, 4)
+
+        auto_frame.add(auto_box)
+        profiles_page.pack_start(auto_frame, False, False, 0)
+
+        notebook.append_page(profiles_page, Gtk.Label(label="Profiles"))
+
+        # ═══════════════════════════════════════════════════════════════
+        # TAB 3: Notifications
+        # ═══════════════════════════════════════════════════════════════
+        notif_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        notif_page.set_margin_start(16)
+        notif_page.set_margin_end(16)
+        notif_page.set_margin_top(16)
+        notif_page.set_margin_bottom(16)
+
+        notif_frame = Gtk.Frame(label="Battery Notifications")
+        notif_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        notif_box.set_margin_start(12)
+        notif_box.set_margin_end(12)
+        notif_box.set_margin_top(8)
+        notif_box.set_margin_bottom(8)
+
+        # Low battery warning
+        low_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        low_label = Gtk.Label(label="Low battery warning at:")
+        low_box.pack_start(low_label, False, False, 0)
+        low_spin = Gtk.SpinButton.new_with_range(5, 50, 5)
+        low_spin.set_value(config.LOW_BATTERY_THRESHOLD)
+        low_label_pct = Gtk.Label(label="%")
+        low_box.pack_start(low_spin, False, False, 0)
+        low_box.pack_start(low_label_pct, False, False, 0)
+        notif_box.pack_start(low_box, False, False, 4)
+
+        # Critical battery warning
+        crit_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        crit_label = Gtk.Label(label="Critical battery warning at:")
+        crit_box.pack_start(crit_label, False, False, 0)
+        crit_spin = Gtk.SpinButton.new_with_range(3, 20, 1)
+        crit_spin.set_value(config.CRITICAL_BATTERY_THRESHOLD)
+        crit_label_pct = Gtk.Label(label="%")
+        crit_box.pack_start(crit_spin, False, False, 0)
+        crit_box.pack_start(crit_label_pct, False, False, 0)
+        notif_box.pack_start(crit_box, False, False, 4)
+
+        notif_frame.add(notif_box)
+        notif_page.pack_start(notif_frame, False, False, 0)
+
+        # Health notifications
+        health_frame = Gtk.Frame(label="Health Notifications")
+        health_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        health_box.set_margin_start(12)
+        health_box.set_margin_end(12)
+        health_box.set_margin_top(8)
+        health_box.set_margin_bottom(8)
+
+        health_check = Gtk.CheckButton(label="Warn when battery health is below 40%")
+        health_check.set_active(True)
+        health_box.pack_start(health_check, False, False, 4)
+
+        health_frame.add(health_box)
+        notif_page.pack_start(health_frame, False, False, 0)
+
+        notebook.append_page(notif_page, Gtk.Label(label="Notifications"))
+
+        # ═══════════════════════════════════════════════════════════════
+        # Bottom buttons
+        # ═══════════════════════════════════════════════════════════════
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        button_box.set_halign(Gtk.Align.CENTER)
-        button_box.set_margin_top(16)
+        button_box.set_halign(Gtk.Align.END)
+        button_box.set_margin_start(12)
+        button_box.set_margin_end(12)
+        button_box.set_margin_bottom(12)
 
-        # System Settings button
-        settings_btn = Gtk.Button(label="System Settings")
-        settings_btn.connect("clicked", self._on_system_settings_clicked)
-        button_box.pack_start(settings_btn, False, False, 0)
+        system_btn = Gtk.Button(label="System Settings")
+        system_btn.connect("clicked", self._on_system_settings_clicked)
+        button_box.pack_start(system_btn, False, False, 0)
 
-        # Close button
         close_btn = Gtk.Button(label="Close")
         close_btn.connect("clicked", lambda w: dialog.destroy())
         button_box.pack_start(close_btn, False, False, 0)
 
-        main_box.pack_start(button_box, False, False, 0)
+        content.pack_start(button_box, False, False, 0)
 
         dialog.show_all()
+
+    def _on_auto_perf_toggled(self, widget: Gtk.CheckButton) -> None:
+        """Handle auto performance toggle."""
+        self.auto_performance_on_ac = widget.get_active()
+
+    def _on_auto_saver_toggled(self, widget: Gtk.CheckButton) -> None:
+        """Handle auto saver toggle."""
+        self.auto_saver_on_battery = widget.get_active()
+
+    def _on_offer_saver_toggled(self, widget: Gtk.CheckButton) -> None:
+        """Handle offer saver toggle."""
+        self.offer_saver_on_low = widget.get_active()
 
     def _add_detail_row(self, grid: Gtk.Grid, row: int, label: str, value: str) -> None:
         """Add a detail row to the grid."""
