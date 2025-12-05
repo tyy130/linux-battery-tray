@@ -665,7 +665,7 @@ class BatteryIndicator:
 
         # Health check (only once per session)
         if not self.battery_health_warned:
-            health = self.get_battery_health()
+            health = self.get_health_percentage()
             if health is not None and health < config.HEALTH_WARNING_THRESHOLD:
                 # Show dialog, and also send a notification
                 try:
@@ -798,7 +798,7 @@ class BatteryIndicator:
 
         if should_update_icon:
             try:
-                self.indicator.set_icon(icon_name)
+                self.indicator.set_icon_full(icon_name, f"Battery {percentage}%")
                 self._last_percentage = percentage
                 self._last_icon_update = now_ts
                 self._last_status = status
