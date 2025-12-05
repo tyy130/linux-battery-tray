@@ -65,13 +65,15 @@ MENU_CSS = """
 }
 .power-manager-status {
     font-size: 1.1em;
-    opacity: 0.8;
+    color: @theme_fg_color;
 }
 .power-manager-detail-label {
-    opacity: 0.7;
+    color: @theme_fg_color;
+    font-weight: normal;
 }
 .power-manager-detail-value {
-    font-weight: 500;
+    font-weight: 600;
+    color: @theme_fg_color;
 }
 .battery-level-bar {
     min-height: 24px;
@@ -251,12 +253,12 @@ class BatteryIndicator:
         # Separator
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Power Profiles submenu
+        # Power Profiles submenu - always show, gracefully handle missing daemon
+        mode_item = Gtk.MenuItem(label="Power Mode")
+        mode_menu = Gtk.Menu()
+        mode_item.set_submenu(mode_menu)
+        
         if self._check_power_profiles_support():
-            mode_item = Gtk.MenuItem(label="Power Mode")
-            mode_menu = Gtk.Menu()
-            mode_item.set_submenu(mode_menu)
-            
             current_profile = self._get_power_profile()
             
             # Performance
@@ -279,9 +281,14 @@ class BatteryIndicator:
             if current_profile == "power-saver":
                 save_item.set_active(True)
             mode_menu.append(save_item)
-            
-            menu.append(mode_item)
-            menu.append(Gtk.SeparatorMenuItem())
+        else:
+            # Show helpful message when power-profiles-daemon is not available
+            unavail_item = Gtk.MenuItem(label="Install power-profiles-daemon")
+            unavail_item.set_sensitive(False)
+            mode_menu.append(unavail_item)
+        
+        menu.append(mode_item)
+        menu.append(Gtk.SeparatorMenuItem())
 
         # Power Manager button (opens our custom dialog)
         power_item = Gtk.MenuItem(label="Power…")
