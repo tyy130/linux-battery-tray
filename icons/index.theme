@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=Battery Indicator
+Comment=Battery Indicator Custom Icons
+Inherits=hicolor
+Directories=hicolor/scalable/status
+
+[hicolor/scalable/status]
+Size=24
+MinSize=16
+MaxSize=256
+Type=Scalable
+Context=Status

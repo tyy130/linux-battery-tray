@@ -105,14 +105,16 @@ install_application() {
 
     # Create installation directory
     sudo mkdir -p "$INSTALL_DIR"
-    sudo mkdir -p "$INSTALL_DIR/icons"
+    sudo mkdir -p "$INSTALL_DIR/icons/hicolor/scalable/status"
 
     # Copy application files
     sudo cp battery_indicator.py "$INSTALL_DIR/"
     sudo cp config.py "$INSTALL_DIR/"
     
-    # Copy custom icons
+    # Copy custom icons with proper theme structure
     sudo cp icons/*.svg "$INSTALL_DIR/icons/"
+    sudo cp icons/index.theme "$INSTALL_DIR/icons/"
+    sudo cp icons/hicolor/scalable/status/*.svg "$INSTALL_DIR/icons/hicolor/scalable/status/"
 
     # Make main script executable
     sudo chmod +x "$INSTALL_DIR/battery_indicator.py"
