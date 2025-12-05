@@ -306,6 +306,30 @@ class BatteryIndicator:
         except (IOError, OSError):
             return None
 
+    def get_health_percentage(self) -> Optional[int]:
+        """
+        Calculate battery health as a percentage of design capacity.
+
+        Returns:
+            Battery health percentage (0-100), or None if unavailable.
+        """
+        energy_full = self._read_battery_file("energy_full")
+        energy_full_design = self._read_battery_file("energy_full_design")
+        
+        # Some systems use charge_full instead of energy_full
+        if not energy_full:
+            energy_full = self._read_battery_file("charge_full")
+        if not energy_full_design:
+            energy_full_design = self._read_battery_file("charge_full_design")
+        
+        if energy_full and energy_full_design:
+            try:
+                health = int(int(energy_full) / int(energy_full_design) * 100)
+                return max(0, min(100, health))  # Clamp to 0-100
+            except (ValueError, ZeroDivisionError):
+                return None
+        return None
+
     def _check_power_profiles_support(self) -> bool:
         """Return True if powerprofilesctl exists on the system."""
         return shutil.which("powerprofilesctl") is not None
