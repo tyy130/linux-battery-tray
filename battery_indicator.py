@@ -113,8 +113,6 @@ MENU_CSS = """
     font-weight: 600;
     color: alpha(@theme_fg_color, 0.6);
     padding: 8px 16px 4px 16px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
 /* Hint text (instead of grayed disabled) */
