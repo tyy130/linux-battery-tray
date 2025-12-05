@@ -624,9 +624,9 @@ class BatteryIndicator:
         self._current_status = status
         self._current_time_info = time_info
 
-        # Update icon
+        # Update icon (use set_icon_full to avoid deprecation warning)
         icon_name = self.get_icon_name(percentage, status)
-        self.indicator.set_icon(icon_name)
+        self.indicator.set_icon_full(icon_name, "Battery Status")
 
         # Update tooltip with battery status
         tooltip_text = self._get_tooltip_text(percentage, status, time_info)
