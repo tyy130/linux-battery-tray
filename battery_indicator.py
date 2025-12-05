@@ -11,7 +11,6 @@ import os
 import sys
 import shutil
 import collections
-import time
 from typing import Optional, Tuple, Deque
 
 import gi
@@ -101,16 +100,13 @@ class BatteryIndicator:
         self.battery_path: Optional[str] = self._find_battery_path()
         self.last_notification_level: Optional[int] = None
         self.install_dir: str = "/opt/battery-indicator"
-
-        # Smoothing and throttling state
-        self.time_history: Deque[float] = collections.deque(maxlen=config.TIME_SMOOTHING_WINDOW)
+        
+        # State for time smoothing and adaptive updates
+        self.time_history: Deque[float] = collections.deque(maxlen=5)
         self.last_time_type: Optional[str] = None
         self.battery_health_warned: bool = False
         self.update_source_id: Optional[int] = None
         self.current_update_interval: int = config.UPDATE_INTERVAL
-        # Icon update damping
-        self._last_percentage: Optional[int] = None
-        self._last_icon_update: float = 0.0
 
         # Apply CSS styling
         self._apply_css()
@@ -130,8 +126,15 @@ class BatteryIndicator:
         # Initial update
         self.update_battery_info()
 
-        # Set up periodic updates (uses adaptive interval)
+        # Set up periodic updates
         self._setup_update_timer(self.current_update_interval)
+
+    def _setup_update_timer(self, interval: int) -> None:
+        """Set up the update timer with the specified interval."""
+        if self.update_source_id is not None:
+            GLib.source_remove(self.update_source_id)
+        self.update_source_id = GLib.timeout_add_seconds(interval, self._periodic_update)
+        self.current_update_interval = interval
 
     def _apply_css(self) -> None:
         """Apply CSS styling to the application."""
@@ -142,16 +145,6 @@ class BatteryIndicator:
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
-    def _setup_update_timer(self, interval: int) -> None:
-        """Set up the GLib timer for periodic updates with an adaptive interval."""
-        if self.update_source_id is not None:
-            try:
-                GLib.source_remove(self.update_source_id)
-            except Exception:
-                pass
-        self.update_source_id = GLib.timeout_add_seconds(interval, self._periodic_update)
-        self.current_update_interval = interval
 
     def _find_battery_path(self) -> Optional[str]:
         """
@@ -164,6 +157,43 @@ class BatteryIndicator:
             if os.path.exists(path):
                 return path
         return None
+
+    def _check_power_profiles_support(self) -> bool:
+        """Check if power-profiles-daemon is available."""
+        return shutil.which("powerprofilesctl") is not None
+
+    def _get_power_profile(self) -> Optional[str]:
+        """Get the current power profile."""
+        if not self._check_power_profiles_support():
+            return None
+        try:
+            result = subprocess.run(
+                ["powerprofilesctl", "get"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            return result.stdout.strip()
+        except subprocess.SubprocessError:
+            return None
+
+    def _set_power_profile(self, profile: str) -> None:
+        """Set the power profile."""
+        if not self._check_power_profiles_support():
+            return
+        try:
+            subprocess.run(
+                ["powerprofilesctl", "set", profile],
+                capture_output=True,
+                timeout=2
+            )
+        except subprocess.SubprocessError:
+            pass
+
+    def _on_power_profile_changed(self, widget: Gtk.RadioMenuItem, profile: str) -> None:
+        """Handle power profile change."""
+        if widget.get_active():
+            self._set_power_profile(profile)
 
     def _build_menu(self) -> Gtk.Menu:
         """
@@ -221,49 +251,37 @@ class BatteryIndicator:
         # Separator
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Quick Settings submenu
-        quick_item = Gtk.MenuItem(label="Quick Settings")
-        quick_menu = Gtk.Menu()
-        quick_item.set_submenu(quick_menu)
-
-        # Battery Saver toggle
-        battery_saver_item = Gtk.CheckMenuItem(label="Battery Saver")
-        battery_saver_item.connect("toggled", self._on_battery_saver_toggled)
-        curr_profile = self._get_power_profile()
-        if curr_profile == "power-saver":
-            battery_saver_item.set_active(True)
-        quick_menu.append(battery_saver_item)
-
-        # Divider
-        quick_menu.append(Gtk.SeparatorMenuItem())
-
-        # Power Mode submenu inside quick settings
-        mode_item = Gtk.MenuItem(label="Power Mode")
-        mode_menu = Gtk.Menu()
-        mode_item.set_submenu(mode_menu)
-        # add radio profile items
-        profiles = ["Performance", "Balanced", "Power Saver"]
-        group = None
-        current_profile = self._get_power_profile()
-        for p in profiles:
-            if group is None:
-                item = Gtk.RadioMenuItem(label=p)
-                group = item
-            else:
-                item = Gtk.RadioMenuItem(group=group, label=p)
-            item.connect("toggled", self._on_power_profile_changed, p)
-            if (p == "Performance" and current_profile == "performance") or (p == "Balanced" and current_profile == "balanced") or (p == "Power Saver" and current_profile == "power-saver") or (current_profile is None and p == config.DEFAULT_POWER_MODE):
-                item.set_active(True)
-            mode_menu.append(item)
-
-        # Customize item
-        customize_item = Gtk.MenuItem(label="Customize...")
-        customize_item.connect("activate", self._on_customize_profiles)
-        mode_menu.append(Gtk.SeparatorMenuItem())
-        mode_menu.append(customize_item)
-
-        quick_menu.append(mode_item)
-        menu.append(quick_item)
+        # Power Profiles submenu
+        if self._check_power_profiles_support():
+            mode_item = Gtk.MenuItem(label="Power Mode")
+            mode_menu = Gtk.Menu()
+            mode_item.set_submenu(mode_menu)
+            
+            current_profile = self._get_power_profile()
+            
+            # Performance
+            perf_item = Gtk.RadioMenuItem(label="Performance")
+            perf_item.connect("toggled", self._on_power_profile_changed, "performance")
+            if current_profile == "performance":
+                perf_item.set_active(True)
+            mode_menu.append(perf_item)
+            
+            # Balanced
+            bal_item = Gtk.RadioMenuItem(group=perf_item, label="Balanced")
+            bal_item.connect("toggled", self._on_power_profile_changed, "balanced")
+            if current_profile == "balanced":
+                bal_item.set_active(True)
+            mode_menu.append(bal_item)
+            
+            # Power Saver
+            save_item = Gtk.RadioMenuItem(group=perf_item, label="Power Saver")
+            save_item.connect("toggled", self._on_power_profile_changed, "power-saver")
+            if current_profile == "power-saver":
+                save_item.set_active(True)
+            mode_menu.append(save_item)
+            
+            menu.append(mode_item)
+            menu.append(Gtk.SeparatorMenuItem())
 
         # Power Manager button (opens our custom dialog)
         power_item = Gtk.MenuItem(label="Power…")
@@ -306,192 +324,6 @@ class BatteryIndicator:
         except (IOError, OSError):
             return None
 
-    def get_health_percentage(self) -> Optional[int]:
-        """
-        Calculate battery health as a percentage of design capacity.
-
-        Returns:
-            Battery health percentage (0-100), or None if unavailable.
-        """
-        energy_full = self._read_battery_file("energy_full")
-        energy_full_design = self._read_battery_file("energy_full_design")
-        
-        # Some systems use charge_full instead of energy_full
-        if not energy_full:
-            energy_full = self._read_battery_file("charge_full")
-        if not energy_full_design:
-            energy_full_design = self._read_battery_file("charge_full_design")
-        
-        if energy_full and energy_full_design:
-            try:
-                health = int(int(energy_full) / int(energy_full_design) * 100)
-                return max(0, min(100, health))  # Clamp to 0-100
-            except (ValueError, ZeroDivisionError):
-                return None
-        return None
-
-    def _check_power_profiles_support(self) -> bool:
-        """Return True if powerprofilesctl exists on the system."""
-        return shutil.which("powerprofilesctl") is not None
-
-    def _get_power_profile(self) -> Optional[str]:
-        """Query the current power profile if supported."""
-        if not self._check_power_profiles_support():
-            return None
-        try:
-            r = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True, timeout=2)
-            return r.stdout.strip()
-        except subprocess.SubprocessError:
-            return None
-
-    def _set_power_profile(self, profile: str) -> bool:
-        """Set the power profile (performance/balanced/power-saver) if supported."""
-        if not self._check_power_profiles_support():
-            return False
-        try:
-            subprocess.run(["powerprofilesctl", "set", profile], check=True, timeout=3)
-            return True
-        except subprocess.SubprocessError:
-            return False
-
-    def _apply_preset(self, name: str) -> None:
-        """Apply a named preset: set profile and brightness where possible."""
-        preset = config.POWER_MODE_PRESETS.get(name)
-        if not preset:
-            return
-
-        # Try set profile using powerprofilesctl (map names to profile strings)
-        mapping = {
-            'Performance': 'performance',
-            'Balanced': 'balanced',
-            'Power Saver': 'power-saver',
-        }
-        profile = mapping.get(name)
-        if profile:
-            self._set_power_profile(profile)
-
-        # Optionally set screen brightness via brightnessctl if present
-        if shutil.which('brightnessctl') and 'brightness' in preset:
-            try:
-                # brightnessctl set expects percentage like '50%'
-                subprocess.run(['brightnessctl', 'set', f"{int(preset['brightness'])}%"], timeout=2)
-            except subprocess.SubprocessError:
-                pass
-
-    def _preset_config_path(self) -> str:
-        """Get path to local presets file for persistence"""
-        cfg_dir = os.path.expanduser('~/.config/battery-indicator')
-        os.makedirs(cfg_dir, exist_ok=True)
-        return os.path.join(cfg_dir, 'presets.json')
-
-    def _load_presets_from_disk(self) -> None:
-        """Load presets from disk if present and merge them into runtime presets."""
-        import json
-        path = self._preset_config_path()
-        try:
-            if os.path.exists(path):
-                with open(path, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        for k, v in data.items():
-                            if k in config.POWER_MODE_PRESETS:
-                                config.POWER_MODE_PRESETS[k].update(v)
-        except Exception:
-            pass
-
-    def _save_presets_to_disk(self) -> None:
-        """Save current presets to the user config directory."""
-        import json
-        path = self._preset_config_path()
-        try:
-            with open(path, 'w') as f:
-                json.dump(config.POWER_MODE_PRESETS, f, indent=2)
-        except Exception:
-            pass
-
-    def _on_customize_profiles(self, widget: Gtk.MenuItem) -> None:
-        """Open a simple customize dialog to edit the presets."""
-        self._load_presets_from_disk()
-        dialog = Gtk.Dialog("Customize Power Profiles", None, 0)
-        dialog.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
-        dialog.add_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
-        dialog.set_default_size(380, 220)
-
-        content = dialog.get_content_area()
-        grid = Gtk.Grid(column_spacing=8, row_spacing=8)
-        content.add(grid)
-
-        # Profile selector
-        profiles = list(config.POWER_MODE_PRESETS.keys())
-        cmb = Gtk.ComboBoxText()
-        for p in profiles:
-            cmb.append_text(p)
-        cmb.set_active(0)
-        grid.attach(Gtk.Label(label="Profile:"), 0, 0, 1, 1)
-        grid.attach(cmb, 1, 0, 1, 1)
-
-        # Brightness slider
-        grid.attach(Gtk.Label(label="Brightness:"), 0, 1, 1, 1)
-        brightness_adj = Gtk.Adjustment(0, 0, 100, 1, 10, 0)
-        brightness_scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=brightness_adj)
-        brightness_scale.set_value(config.POWER_MODE_PRESETS[profiles[0]].get('brightness', 80))
-        grid.attach(brightness_scale, 1, 1, 1, 1)
-
-        # Dim on battery toggle
-        dim_toggle = Gtk.CheckButton(label="Dim on battery")
-        dim_toggle.set_active(config.POWER_MODE_PRESETS[profiles[0]].get('dim_on_battery', True))
-        grid.attach(dim_toggle, 0, 2, 2, 1)
-
-        # Dim percent
-        grid.attach(Gtk.Label(label="Dim Percent:"), 0, 3, 1, 1)
-        dim_adj = Gtk.Adjustment(30, 0, 100, 1, 10, 0)
-        dim_spin = Gtk.SpinButton(adjustment=dim_adj)
-        dim_spin.set_value(config.POWER_MODE_PRESETS[profiles[0]].get('dim_percent', 60))
-        grid.attach(dim_spin, 1, 3, 1, 1)
-
-        # When profile changes, update UI
-        def on_profile_changed(cb):
-            name = cb.get_active_text()
-            if name and name in config.POWER_MODE_PRESETS:
-                p = config.POWER_MODE_PRESETS[name]
-                brightness_scale.set_value(p.get('brightness', 80))
-                dim_toggle.set_active(p.get('dim_on_battery', True))
-                dim_spin.set_value(p.get('dim_percent', 60))
-
-        cmb.connect('changed', on_profile_changed)
-
-        response = dialog.run()
-        if response == Gtk.ResponseType.OK:
-            name = cmb.get_active_text()
-            if name:
-                config.POWER_MODE_PRESETS[name]['brightness'] = int(brightness_scale.get_value())
-                config.POWER_MODE_PRESETS[name]['dim_on_battery'] = bool(dim_toggle.get_active())
-                config.POWER_MODE_PRESETS[name]['dim_percent'] = int(dim_spin.get_value())
-                self._save_presets_to_disk()
-                # apply if active
-                current = self._get_power_profile()
-                mapping = {'Performance': 'performance', 'Balanced': 'balanced', 'Power Saver': 'power-saver'}
-                if mapping.get(name) == current:
-                    self._apply_preset(name)
-
-        dialog.destroy()
-
-    def _on_power_profile_changed(self, widget: Gtk.RadioMenuItem, profile: str) -> None:
-        """Handle radio menu toggles, applying the named profile if active."""
-        if widget.get_active():
-            self._apply_preset(profile)
-
-    def _on_battery_saver_toggled(self, widget: Gtk.CheckMenuItem) -> None:
-        """Toggle battery saver: sets power-saver profile if active, otherwise revert to default."""
-        active = widget.get_active()
-        if active:
-            self._apply_preset('Power Saver')
-        else:
-            # restore last known or default
-            last = self._get_power_profile()
-            if last is None or last == 'power-saver':
-                self._apply_preset(config.DEFAULT_POWER_MODE)
-
     def get_battery_percentage(self) -> Optional[int]:
         """
         Get the current battery percentage.
@@ -517,17 +349,32 @@ class BatteryIndicator:
         status = self._read_battery_file("status")
         return status if status else "Unknown"
 
-    def get_time_remaining(self) -> str:
+    def _parse_upower_time_to_minutes(self, time_str: str) -> float:
+        """Parse upower time string to minutes."""
+        parts = time_str.strip().split()
+        if len(parts) < 2:
+            return 0.0
+        try:
+            val = float(parts[0])
+            unit = parts[1].lower()
+            if 'hour' in unit:
+                return val * 60
+            elif 'minute' in unit:
+                return val
+            return 0.0
+        except ValueError:
+            return 0.0
+
+    def get_time_remaining(self) -> Tuple[str, str]:
         """
-        Get the time remaining estimate using upower.
+        Get the time remaining estimate using upower with smoothing.
 
         Returns:
-            A string describing the time remaining, or "Unknown" if unavailable.
+            A tuple of (time_string, time_type).
         """
         if not self.battery_path:
-            return "Unknown"
+            return ("Unknown", "status")
 
-        # Extract battery name from path (e.g., BAT0 from /sys/class/power_supply/BAT0)
         battery_name = os.path.basename(self.battery_path)
         upower_device = f"/org/freedesktop/UPower/devices/battery_{battery_name}"
 
@@ -540,20 +387,44 @@ class BatteryIndicator:
             )
             output = result.stdout
 
-            # Try to get time to empty or time to full
+            current_time_type = None
+            raw_time_str = None
+
             for line in output.split('\n'):
                 if 'time to empty' in line.lower():
-                    parts = line.split(':', 1)
-                    if len(parts) >= 2:
-                        time_str = self._format_time_string(parts[1].strip())
-                        return (time_str, "remaining")
+                    current_time_type = "remaining"
+                    raw_time_str = line.split(':', 1)[1].strip()
+                    break
                 elif 'time to full' in line.lower():
-                    parts = line.split(':', 1)
-                    if len(parts) >= 2:
-                        time_str = self._format_time_string(parts[1].strip())
-                        return (time_str, "until full")
+                    current_time_type = "until full"
+                    raw_time_str = line.split(':', 1)[1].strip()
+                    break
 
-            # If no time info found, return status
+            if current_time_type and raw_time_str:
+                # If time type changed (e.g. plugged in), reset history
+                if current_time_type != self.last_time_type:
+                    self.time_history.clear()
+                    self.last_time_type = current_time_type
+
+                # Parse and smooth
+                minutes = self._parse_upower_time_to_minutes(raw_time_str)
+                if minutes > 0:
+                    self.time_history.append(minutes)
+                    
+                    # Calculate average for smoothing
+                    avg_minutes = sum(self.time_history) / len(self.time_history)
+                    
+                    # Format to string
+                    hours = int(avg_minutes / 60)
+                    mins = int(avg_minutes % 60)
+                    
+                    if hours > 0:
+                        time_str = f"{hours} hr {mins} min"
+                    else:
+                        time_str = f"{mins} min"
+                        
+                    return (time_str, current_time_type)
+
             status = self.get_battery_status()
             if status == "Full":
                 return ("Fully Charged", "status")
@@ -561,46 +432,6 @@ class BatteryIndicator:
 
         except (subprocess.SubprocessError, FileNotFoundError):
             return ("Unknown", "status")
-
-    def _format_time_string(self, time_str: str) -> str:
-        """
-        Convert upower time format to human-readable format.
-        Converts '2.5 hours' to '2 hr 30 min', '45 minutes' to '45 min', etc.
-
-        Args:
-            time_str: Raw time string from upower.
-
-        Returns:
-            Formatted time string.
-        """
-        time_str = time_str.strip().lower()
-        
-        # Handle 'X.Y hours' format
-        if 'hour' in time_str:
-            try:
-                # Extract the number
-                num = float(time_str.split()[0])
-                hours = int(num)
-                minutes = int((num - hours) * 60)
-                
-                if hours > 0 and minutes > 0:
-                    return f"{hours} hr {minutes} min"
-                elif hours > 0:
-                    return f"{hours} hr"
-                else:
-                    return f"{minutes} min"
-            except (ValueError, IndexError):
-                return time_str
-        
-        # Handle 'X.Y minutes' or 'X minutes' format
-        elif 'minute' in time_str:
-            try:
-                num = float(time_str.split()[0])
-                return f"{int(num)} min"
-            except (ValueError, IndexError):
-                return time_str
-        
-        return time_str
 
     def get_icon_name(self, percentage: Optional[int], status: str) -> str:
         """
@@ -648,6 +479,23 @@ class BatteryIndicator:
         except (subprocess.SubprocessError, FileNotFoundError):
             pass  # Silently fail if notify-send is not available
 
+    def get_battery_health(self) -> Optional[int]:
+        """Calculate battery health percentage."""
+        energy_full = self._read_battery_file("energy_full")
+        energy_full_design = self._read_battery_file("energy_full_design")
+        
+        if not energy_full or not energy_full_design:
+            # Try charge_* if energy_* not available
+            energy_full = self._read_battery_file("charge_full")
+            energy_full_design = self._read_battery_file("charge_full_design")
+
+        if energy_full and energy_full_design:
+            try:
+                return int(int(energy_full) / int(energy_full_design) * 100)
+            except (ValueError, ZeroDivisionError):
+                pass
+        return None
+
     def check_low_battery(self, percentage: Optional[int], status: str) -> None:
         """
         Check if battery is low and send notifications as needed.
@@ -687,20 +535,15 @@ class BatteryIndicator:
         else:
             self.last_notification_level = None
 
-        # Health check (only once per session)
+        # Battery health check (only once per session)
         if not self.battery_health_warned:
-            health = self.get_health_percentage()
-            if health is not None and health < config.HEALTH_WARNING_THRESHOLD:
-                # Show dialog, and also send a notification
-                try:
-                    self._show_battery_health_dialog(health)
-                except Exception:
-                    # Fallback to notification
-                    self.send_notification(
-                        "Battery Health Warning",
-                        f"Battery health is low ({health}%). Consider replacing it.",
-                        "normal"
-                    )
+            health = self.get_battery_health()
+            if health is not None and health < 40:
+                self.send_notification(
+                    "Battery Health Warning",
+                    f"Your battery health is low ({health}%). Consider replacing it soon.",
+                    "normal"
+                )
                 self.battery_health_warned = True
 
     def _get_tooltip_text(self, percentage: Optional[int], status: str, time_info: Tuple[str, str]) -> str:
@@ -737,27 +580,6 @@ class BatteryIndicator:
             return f"Not Charging ({percentage}%)"
         else:
             return f"Battery {percentage}%"
-
-    def _show_battery_health_dialog(self, health: int) -> None:
-        """Show a modal dialog to warn users about degraded battery health."""
-        dialog = Gtk.MessageDialog(
-            transient_for=None,
-            flags=0,
-            message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.NONE,
-            text=f"Battery Health: {health}%"
-        )
-        dialog.format_secondary_text(
-            "Your battery's maximum capacity has dropped. Consider replacing it to restore expected runtime."
-        )
-        dialog.add_buttons("Close", Gtk.ResponseType.CLOSE, "More Info", Gtk.ResponseType.OK)
-        response = dialog.run()
-        if response == Gtk.ResponseType.OK:
-            try:
-                subprocess.Popen(['xdg-open', 'https://en.wikipedia.org/wiki/Lithium-ion_battery#Degradation'])
-            except Exception:
-                pass
-        dialog.destroy()
 
     def _format_time_display(self, status: str, time_info: Tuple[str, str]) -> str:
         """
@@ -802,32 +624,9 @@ class BatteryIndicator:
         self._current_status = status
         self._current_time_info = time_info
 
-        # Update icon with damping to avoid flicker on fluctuating estimates
+        # Update icon
         icon_name = self.get_icon_name(percentage, status)
-        now_ts = time.time()
-        should_update_icon = False
-        if self._last_percentage is None:
-            should_update_icon = True
-        elif percentage is None:
-            should_update_icon = True
-        else:
-            # update only if difference is substantial or enough time passed
-            if abs(percentage - (self._last_percentage or 0)) >= 1:
-                should_update_icon = True
-            if now_ts - self._last_icon_update > 12:
-                should_update_icon = True
-            # also update if status changed
-            if status.lower() != getattr(self, '_last_status', '').lower():
-                should_update_icon = True
-
-        if should_update_icon:
-            try:
-                self.indicator.set_icon_full(icon_name, f"Battery {percentage}%")
-                self._last_percentage = percentage
-                self._last_icon_update = now_ts
-                self._last_status = status
-            except Exception:
-                pass
+        self.indicator.set_icon(icon_name)
 
         # Update tooltip with battery status
         tooltip_text = self._get_tooltip_text(percentage, status, time_info)
@@ -876,12 +675,24 @@ class BatteryIndicator:
 
     def _periodic_update(self) -> bool:
         """
-        Periodic update callback.
+        Periodic update callback with adaptive interval.
 
         Returns:
             True to continue the timeout, False to stop it.
         """
         self.update_battery_info()
+        
+        # Adaptive update interval - more frequent when battery is low
+        percentage = self.get_battery_percentage()
+        if percentage is not None:
+            new_interval = config.UPDATE_INTERVAL
+            if percentage < 20:
+                new_interval = 10  # Update every 10s when below 20%
+            
+            if new_interval != self.current_update_interval:
+                self._setup_update_timer(new_interval)
+                return False  # Stop this timer, new one started
+                
         return True  # Continue the timeout
 
     def _on_refresh_clicked(self, widget: Gtk.MenuItem) -> None:

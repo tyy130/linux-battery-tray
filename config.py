@@ -27,37 +27,3 @@ BATTERY_PATHS: list = [
     "/sys/class/power_supply/BAT0",
     "/sys/class/power_supply/BAT1",
 ]
-
-# Smoothing/behavior options
-# How many samples to keep for time smoothing
-TIME_SMOOTHING_WINDOW: int = 5
-
-# At or below this health percentage, warn the user
-HEALTH_WARNING_THRESHOLD: int = 40
-
-# Update interval (seconds) when low battery
-LOW_BATTERY_UPDATE_INTERVAL: int = 10
-
-# Power mode presets - a simple, adjustable mapping of modes to settings
-# Each mode can define brightness (0-100), dim_on_battery (bool), dim_percent (0-100)
-POWER_MODE_PRESETS = {
-    "Performance": {
-        "brightness": 100,
-        "dim_on_battery": False,
-        "dim_percent": 100,
-    },
-    "Balanced": {
-        "brightness": 80,
-        "dim_on_battery": True,
-        "dim_percent": 60,
-    },
-    "Power Saver": {
-        "brightness": 40,
-        "dim_on_battery": True,
-        "dim_percent": 30,
-    }
-}
-
-# Default power mode to show
-DEFAULT_POWER_MODE: str = "Balanced"
-
