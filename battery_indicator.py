@@ -22,71 +22,146 @@ from gi.repository import Gtk, GLib, AppIndicator3, Gdk
 import config
 
 
-# CSS for modern UI styling that respects system theme
+# CSS for modern dashboard-style UI
 MENU_CSS = """
-.battery-header {
-    font-weight: bold;
-    font-size: 1.1em;
-    padding: 8px 12px;
+/* Header Card */
+.battery-card {
+    padding: 12px 16px;
 }
-.battery-status {
-    padding: 4px 12px;
-    font-size: 0.95em;
+.battery-title-row {
+    font-size: 1.15em;
+    font-weight: 600;
 }
-.battery-time {
-    padding: 4px 12px;
+.battery-subtitle {
+    font-size: 0.92em;
+    color: alpha(@theme_fg_color, 0.75);
+    margin-top: 2px;
+}
+
+/* Battery Level Bar */
+.battery-level-bar {
+    min-height: 8px;
+    border-radius: 4px;
+    margin: 8px 0;
+}
+.battery-level-bar trough {
+    min-height: 8px;
+    border-radius: 4px;
+    background-color: alpha(@theme_fg_color, 0.15);
+}
+.battery-level-bar progress {
+    min-height: 8px;
+    border-radius: 4px;
+    background-color: @theme_selected_bg_color;
+}
+.battery-level-good progress {
+    background-color: #4caf50;
+}
+.battery-level-ok progress {
+    background-color: #ff9800;
+}
+.battery-level-low progress {
+    background-color: #f44336;
+}
+.battery-level-critical progress {
+    background-color: #d32f2f;
+}
+
+/* Status colors */
+.status-charging {
+    color: #42a5f5;
+}
+.status-full {
+    color: #66bb6a;
+}
+.status-low {
+    color: #ff9800;
+}
+.status-critical {
+    color: #f44336;
+}
+
+/* Slider controls */
+.control-row {
+    padding: 6px 16px;
+}
+.control-label {
     font-size: 0.9em;
-    opacity: 0.8;
+    min-width: 90px;
 }
-.battery-progress {
-    min-height: 10px;
-    margin: 8px 12px;
-    border-radius: 5px;
+.control-slider {
+    min-width: 120px;
 }
-.battery-progress trough {
-    min-height: 10px;
-    border-radius: 5px;
-    background-color: alpha(currentColor, 0.1);
+.control-slider trough {
+    min-height: 6px;
+    border-radius: 3px;
+    background-color: alpha(@theme_fg_color, 0.15);
 }
-.battery-progress progress {
-    min-height: 10px;
-    border-radius: 5px;
+.control-slider highlight {
+    min-height: 6px;
+    border-radius: 3px;
+}
+.control-slider slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+}
+
+/* Menu section styling */
+.menu-section-label {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: alpha(@theme_fg_color, 0.6);
+    padding: 8px 16px 4px 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Hint text (instead of grayed disabled) */
+.hint-text {
+    font-style: italic;
+    color: alpha(@theme_fg_color, 0.6);
+    font-size: 0.85em;
+}
+
+/* Power mode indicator */
+.mode-active {
+    font-weight: 600;
+}
+
+/* Extra info row */
+.info-row {
+    font-size: 0.85em;
+    color: alpha(@theme_fg_color, 0.7);
+    padding: 4px 16px;
 }
 
 /* Power Manager Dialog Styles */
-.power-manager-header {
-    font-size: 1.4em;
-    font-weight: bold;
-    padding: 12px;
-}
 .power-manager-percentage {
     font-size: 3em;
     font-weight: 300;
 }
 .power-manager-status {
     font-size: 1.1em;
-    color: @theme_fg_color;
 }
 .power-manager-detail-label {
-    color: @theme_fg_color;
     font-weight: normal;
 }
 .power-manager-detail-value {
     font-weight: 600;
-    color: @theme_fg_color;
 }
-.battery-level-bar {
-    min-height: 24px;
-    border-radius: 12px;
+.dialog-level-bar {
+    min-height: 20px;
+    border-radius: 10px;
 }
-.battery-level-bar trough {
-    min-height: 24px;
-    border-radius: 12px;
-    background-color: alpha(currentColor, 0.15);
+.dialog-level-bar trough {
+    min-height: 20px;
+    border-radius: 10px;
+    background-color: alpha(@theme_fg_color, 0.15);
 }
-.battery-level-bar progress {
-    min-height: 24px;
-    border-radius: 12px;
+.dialog-level-bar progress {
+    min-height: 20px;
+    border-radius: 10px;
 }
 """
 
@@ -197,63 +272,169 @@ class BatteryIndicator:
         if widget.get_active():
             self._set_power_profile(profile)
 
+    def _get_brightness_path(self) -> Optional[str]:
+        """Find the backlight brightness path."""
+        backlight_base = "/sys/class/backlight"
+        if os.path.exists(backlight_base):
+            for name in os.listdir(backlight_base):
+                path = os.path.join(backlight_base, name)
+                if os.path.exists(os.path.join(path, "brightness")):
+                    return path
+        return None
+
+    def _get_brightness(self) -> Optional[Tuple[int, int]]:
+        """Get current brightness and max brightness."""
+        path = self._get_brightness_path()
+        if not path:
+            return None
+        try:
+            with open(os.path.join(path, "brightness")) as f:
+                current = int(f.read().strip())
+            with open(os.path.join(path, "max_brightness")) as f:
+                max_val = int(f.read().strip())
+            return (current, max_val)
+        except (IOError, ValueError):
+            return None
+
+    def _set_brightness(self, value: int) -> None:
+        """Set brightness value."""
+        path = self._get_brightness_path()
+        if not path:
+            return
+        try:
+            # Use pkexec or brightnessctl if available
+            if shutil.which("brightnessctl"):
+                subprocess.run(["brightnessctl", "set", str(value)], 
+                             capture_output=True, timeout=2)
+            else:
+                # Direct write (may need permissions)
+                with open(os.path.join(path, "brightness"), "w") as f:
+                    f.write(str(value))
+        except (IOError, subprocess.SubprocessError):
+            pass
+
+    def _on_brightness_changed(self, scale: Gtk.Scale) -> None:
+        """Handle brightness slider change."""
+        value = int(scale.get_value())
+        self._set_brightness(value)
+
     def _build_menu(self) -> Gtk.Menu:
         """
         Build the dropdown menu for the indicator.
-
-        Returns:
-            A Gtk.Menu with battery information and controls.
+        Dashboard-style card UI with status, controls, and actions.
         """
         menu = Gtk.Menu()
 
-        # Battery percentage header
+        # ═══════════════════════════════════════════════════════════════
+        # HEADER CARD - Battery status with icon
+        # ═══════════════════════════════════════════════════════════════
         self.header_item = Gtk.MenuItem()
-        header_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.header_label = Gtk.Label(label="---%")
-        self.header_label.set_halign(Gtk.Align.START)
-        self.header_label.get_style_context().add_class("battery-header")
-        header_box.pack_start(self.header_label, False, False, 0)
-        self.header_item.add(header_box)
         self.header_item.set_sensitive(False)
+        header_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        header_card.set_margin_start(4)
+        header_card.set_margin_end(4)
+        header_card.set_margin_top(8)
+        header_card.set_margin_bottom(4)
+        
+        # Title row: [icon] Battery at XX%
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.header_icon = Gtk.Image.new_from_icon_name("battery-full-symbolic", Gtk.IconSize.MENU)
+        title_row.pack_start(self.header_icon, False, False, 0)
+        
+        self.header_label = Gtk.Label(label="Battery at ---%")
+        self.header_label.set_halign(Gtk.Align.START)
+        self.header_label.get_style_context().add_class("battery-title-row")
+        title_row.pack_start(self.header_label, False, False, 0)
+        header_card.pack_start(title_row, False, False, 0)
+        
+        # Subtitle row: Status — time remaining
+        self.subtitle_label = Gtk.Label(label="Checking status...")
+        self.subtitle_label.set_halign(Gtk.Align.START)
+        self.subtitle_label.set_margin_start(24)  # Align with text after icon
+        self.subtitle_label.get_style_context().add_class("battery-subtitle")
+        header_card.pack_start(self.subtitle_label, False, False, 0)
+        
+        self.header_item.add(header_card)
         menu.append(self.header_item)
 
-        # Status item with accent color support
-        self.status_item = Gtk.MenuItem()
-        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.status_label = Gtk.Label(label="Unknown")
-        self.status_label.set_halign(Gtk.Align.START)
-        self.status_label.get_style_context().add_class("battery-status")
-        status_box.pack_start(self.status_label, False, False, 0)
-        self.status_item.add(status_box)
-        self.status_item.set_sensitive(False)
-        menu.append(self.status_item)
-
-        # Progress bar for battery level
+        # ═══════════════════════════════════════════════════════════════
+        # BATTERY LEVEL BAR - Color-coded progress
+        # ═══════════════════════════════════════════════════════════════
         self.progress_item = Gtk.MenuItem()
+        self.progress_item.set_sensitive(False)
         progress_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        progress_box.set_margin_start(4)
+        progress_box.set_margin_end(4)
+        
         self.progress_bar = Gtk.ProgressBar()
         self.progress_bar.set_fraction(0.0)
-        self.progress_bar.get_style_context().add_class("battery-progress")
-        progress_box.pack_start(self.progress_bar, False, False, 8)
+        self.progress_bar.get_style_context().add_class("battery-level-bar")
+        progress_box.pack_start(self.progress_bar, False, False, 4)
+        
         self.progress_item.add(progress_box)
-        self.progress_item.set_sensitive(False)
         menu.append(self.progress_item)
 
-        # Time remaining item
-        self.time_item = Gtk.MenuItem()
-        time_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.time_label = Gtk.Label(label="Estimating...")
-        self.time_label.set_halign(Gtk.Align.START)
-        self.time_label.get_style_context().add_class("battery-time")
-        time_box.pack_start(self.time_label, False, False, 0)
-        self.time_item.add(time_box)
-        self.time_item.set_sensitive(False)
-        menu.append(self.time_item)
+        # ═══════════════════════════════════════════════════════════════
+        # EXTRA INFO ROW - Battery health or power draw
+        # ═══════════════════════════════════════════════════════════════
+        self.info_item = Gtk.MenuItem()
+        self.info_item.set_sensitive(False)
+        info_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        info_box.set_margin_start(4)
+        
+        self.info_label = Gtk.Label(label="")
+        self.info_label.set_halign(Gtk.Align.START)
+        self.info_label.get_style_context().add_class("info-row")
+        info_box.pack_start(self.info_label, False, False, 0)
+        
+        self.info_item.add(info_box)
+        menu.append(self.info_item)
 
-        # Separator
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Power Profiles submenu - always show, gracefully handle missing daemon
+        # ═══════════════════════════════════════════════════════════════
+        # CONTROLS SECTION - Brightness slider
+        # ═══════════════════════════════════════════════════════════════
+        brightness_info = self._get_brightness()
+        if brightness_info:
+            current_brightness, max_brightness = brightness_info
+            
+            brightness_item = Gtk.MenuItem()
+            brightness_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            brightness_box.set_margin_start(4)
+            brightness_box.set_margin_end(4)
+            
+            # Sun icon
+            sun_icon = Gtk.Image.new_from_icon_name("display-brightness-symbolic", Gtk.IconSize.MENU)
+            brightness_box.pack_start(sun_icon, False, False, 0)
+            
+            # Label
+            brightness_label = Gtk.Label(label="Brightness")
+            brightness_label.set_halign(Gtk.Align.START)
+            brightness_label.get_style_context().add_class("control-label")
+            brightness_box.pack_start(brightness_label, False, False, 0)
+            
+            # Slider
+            self.brightness_scale = Gtk.Scale.new_with_range(
+                Gtk.Orientation.HORIZONTAL, 
+                1, max_brightness, max_brightness / 100
+            )
+            self.brightness_scale.set_value(current_brightness)
+            self.brightness_scale.set_draw_value(False)
+            self.brightness_scale.set_size_request(120, -1)
+            self.brightness_scale.get_style_context().add_class("control-slider")
+            self.brightness_scale.connect("value-changed", self._on_brightness_changed)
+            brightness_box.pack_end(self.brightness_scale, False, False, 0)
+            
+            brightness_item.add(brightness_box)
+            # Keep the item sensitive so slider works
+            menu.append(brightness_item)
+            
+            menu.append(Gtk.SeparatorMenuItem())
+
+        # ═══════════════════════════════════════════════════════════════
+        # POWER MODE - With visual indicator of current mode
+        # ═══════════════════════════════════════════════════════════════
         mode_item = Gtk.MenuItem(label="Power Mode")
         mode_menu = Gtk.Menu()
         mode_item.set_submenu(mode_menu)
@@ -262,49 +443,78 @@ class BatteryIndicator:
             current_profile = self._get_power_profile()
             
             # Performance
-            perf_item = Gtk.RadioMenuItem(label="Performance")
+            perf_item = Gtk.RadioMenuItem(label="⚡ Performance")
             perf_item.connect("toggled", self._on_power_profile_changed, "performance")
             if current_profile == "performance":
                 perf_item.set_active(True)
+                perf_item.get_style_context().add_class("mode-active")
             mode_menu.append(perf_item)
             
             # Balanced
-            bal_item = Gtk.RadioMenuItem(group=perf_item, label="Balanced")
+            bal_item = Gtk.RadioMenuItem(group=perf_item, label="⚖ Balanced")
             bal_item.connect("toggled", self._on_power_profile_changed, "balanced")
             if current_profile == "balanced":
                 bal_item.set_active(True)
+                bal_item.get_style_context().add_class("mode-active")
             mode_menu.append(bal_item)
             
             # Power Saver
-            save_item = Gtk.RadioMenuItem(group=perf_item, label="Power Saver")
+            save_item = Gtk.RadioMenuItem(group=perf_item, label="🔋 Power Saver")
             save_item.connect("toggled", self._on_power_profile_changed, "power-saver")
             if current_profile == "power-saver":
                 save_item.set_active(True)
+                save_item.get_style_context().add_class("mode-active")
             mode_menu.append(save_item)
         else:
-            # Show helpful message when power-profiles-daemon is not available
-            unavail_item = Gtk.MenuItem(label="Install power-profiles-daemon")
-            unavail_item.set_sensitive(False)
-            mode_menu.append(unavail_item)
+            # Hint text instead of gray disabled
+            hint_item = Gtk.MenuItem()
+            hint_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            hint_icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.MENU)
+            hint_box.pack_start(hint_icon, False, False, 0)
+            hint_label = Gtk.Label(label="Install power-profiles-daemon")
+            hint_label.get_style_context().add_class("hint-text")
+            hint_box.pack_start(hint_label, False, False, 0)
+            hint_item.add(hint_box)
+            hint_item.set_sensitive(False)
+            mode_menu.append(hint_item)
         
         menu.append(mode_item)
-        menu.append(Gtk.SeparatorMenuItem())
 
-        # Power Manager button (opens our custom dialog)
-        power_item = Gtk.MenuItem(label="Power…")
+        # Power Settings
+        power_item = Gtk.MenuItem()
+        power_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        power_icon = Gtk.Image.new_from_icon_name("preferences-system-power-symbolic", Gtk.IconSize.MENU)
+        power_box.pack_start(power_icon, False, False, 0)
+        power_label = Gtk.Label(label="Power Settings")
+        power_box.pack_start(power_label, False, False, 0)
+        power_item.add(power_box)
         power_item.connect("activate", self._on_power_settings_clicked)
         menu.append(power_item)
 
-        # Separator before system actions
         menu.append(Gtk.SeparatorMenuItem())
 
-        # About button
-        about_item = Gtk.MenuItem(label="About")
+        # ═══════════════════════════════════════════════════════════════
+        # ACTIONS SECTION
+        # ═══════════════════════════════════════════════════════════════
+        # About
+        about_item = Gtk.MenuItem()
+        about_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        about_icon = Gtk.Image.new_from_icon_name("help-about-symbolic", Gtk.IconSize.MENU)
+        about_box.pack_start(about_icon, False, False, 0)
+        about_label = Gtk.Label(label="About")
+        about_box.pack_start(about_label, False, False, 0)
+        about_item.add(about_box)
         about_item.connect("activate", self._on_about_clicked)
         menu.append(about_item)
 
-        # Quit button
-        quit_item = Gtk.MenuItem(label="Quit")
+        # Quit
+        quit_item = Gtk.MenuItem()
+        quit_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        quit_icon = Gtk.Image.new_from_icon_name("application-exit-symbolic", Gtk.IconSize.MENU)
+        quit_box.pack_start(quit_icon, False, False, 0)
+        quit_label = Gtk.Label(label="Quit")
+        quit_box.pack_start(quit_label, False, False, 0)
+        quit_item.add(quit_box)
         quit_item.connect("activate", self._on_quit_clicked)
         menu.append(quit_item)
 
@@ -631,7 +841,7 @@ class BatteryIndicator:
         self._current_status = status
         self._current_time_info = time_info
 
-        # Update icon (use set_icon_full to avoid deprecation warning)
+        # Update tray icon (use set_icon_full to avoid deprecation warning)
         icon_name = self.get_icon_name(percentage, status)
         self.indicator.set_icon_full(icon_name, "Battery Status")
 
@@ -645,37 +855,111 @@ class BatteryIndicator:
         else:
             self.indicator.set_label("", "")
 
-        # Update menu items with modern UI
+        # ═══════════════════════════════════════════════════════════════
+        # UPDATE HEADER CARD
+        # ═══════════════════════════════════════════════════════════════
+        status_lower = status.lower()
+        
+        # Update header icon to match battery level
+        self.header_icon.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        
+        # Update header label: "Battery at XX%"
         if percentage is not None:
-            self.header_label.set_text(f"{percentage}%")
-            self.progress_bar.set_fraction(percentage / 100.0)
+            self.header_label.set_text(f"Battery at {percentage}%")
         else:
             self.header_label.set_text("Battery Not Detected")
-            self.progress_bar.set_fraction(0.0)
-
-        # Update status with accent color for charging
-        status_lower = status.lower()
-        style_context = self.status_label.get_style_context()
-        # Remove previous state classes
-        style_context.remove_class("suggested-action")
-        style_context.remove_class("destructive-action")
-
-        if status_lower == "charging":
-            self.status_label.set_text("Charging")
-            style_context.add_class("suggested-action")
-        elif status_lower == "discharging":
-            self.status_label.set_text("On Battery")
-        elif status_lower == "full":
-            self.status_label.set_text("Fully Charged")
-            style_context.add_class("suggested-action")
-        elif status_lower == "not charging":
-            self.status_label.set_text("Plugged In")
+        
+        # Update subtitle: "Status — time remaining"
+        time_str, time_type = time_info
+        if percentage is not None:
+            if status_lower == "charging":
+                status_text = "Charging"
+                if time_type == "until full":
+                    subtitle = f"{status_text} — {time_str} until full"
+                else:
+                    subtitle = f"{status_text} — estimating..."
+            elif status_lower == "discharging":
+                status_text = "On battery"
+                if time_type == "remaining":
+                    subtitle = f"{status_text} — {time_str} remaining"
+                else:
+                    subtitle = f"{status_text} — estimating..."
+            elif status_lower == "full":
+                subtitle = "Fully charged"
+            elif status_lower == "not charging":
+                subtitle = "Plugged in, not charging"
+            else:
+                subtitle = status
         else:
-            self.status_label.set_text(status)
+            subtitle = "No battery detected"
+        
+        self.subtitle_label.set_text(subtitle)
+        
+        # Apply status color to header
+        header_style = self.header_label.get_style_context()
+        for cls in ["status-charging", "status-full", "status-low", "status-critical"]:
+            header_style.remove_class(cls)
+        
+        if status_lower == "charging":
+            header_style.add_class("status-charging")
+        elif status_lower == "full":
+            header_style.add_class("status-full")
+        elif percentage is not None and percentage <= config.CRITICAL_BATTERY_THRESHOLD:
+            header_style.add_class("status-critical")
+        elif percentage is not None and percentage <= config.LOW_BATTERY_THRESHOLD:
+            header_style.add_class("status-low")
 
-        # Update time display
-        time_display = self._format_time_display(status, time_info)
-        self.time_label.set_text(time_display)
+        # ═══════════════════════════════════════════════════════════════
+        # UPDATE BATTERY LEVEL BAR - Color-coded
+        # ═══════════════════════════════════════════════════════════════
+        if percentage is not None:
+            self.progress_bar.set_fraction(percentage / 100.0)
+        else:
+            self.progress_bar.set_fraction(0.0)
+        
+        # Apply color class based on level
+        bar_style = self.progress_bar.get_style_context()
+        for cls in ["battery-level-good", "battery-level-ok", "battery-level-low", "battery-level-critical"]:
+            bar_style.remove_class(cls)
+        
+        if percentage is not None:
+            if percentage >= 50:
+                bar_style.add_class("battery-level-good")
+            elif percentage >= 30:
+                bar_style.add_class("battery-level-ok")
+            elif percentage >= config.CRITICAL_BATTERY_THRESHOLD:
+                bar_style.add_class("battery-level-low")
+            else:
+                bar_style.add_class("battery-level-critical")
+
+        # ═══════════════════════════════════════════════════════════════
+        # UPDATE INFO ROW - Show health or power draw
+        # ═══════════════════════════════════════════════════════════════
+        health = self.get_battery_health()
+        power_now = self._read_battery_file("power_now")
+        
+        info_parts = []
+        if health is not None:
+            if health >= 80:
+                health_text = f"Health: {health}% (Good)"
+            elif health >= 50:
+                health_text = f"Health: {health}% (Fair)"
+            else:
+                health_text = f"Health: {health}% (Poor)"
+            info_parts.append(health_text)
+        
+        if power_now:
+            try:
+                power_w = int(power_now) / 1000000
+                info_parts.append(f"Power: {power_w:.1f} W")
+            except ValueError:
+                pass
+        
+        if info_parts:
+            self.info_label.set_text("  •  ".join(info_parts))
+            self.info_item.show()
+        else:
+            self.info_item.hide()
 
         # Check for low battery warnings
         self.check_low_battery(percentage, status)
