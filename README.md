@@ -39,7 +39,24 @@ Uses system symbolic icons for better desktop integration and animated icon supp
 
 ## Installation
 
-### Quick Install (Recommended)
+### Debian/Ubuntu Package (Recommended)
+
+You can build and install the `.deb` package for a clean system integration:
+
+```bash
+# Build the package
+./packaging/build_deb.sh
+
+# Install
+sudo apt install ./linux-battery-tray_1.0.0_all.deb
+```
+
+To uninstall:
+```bash
+sudo apt remove linux-battery-tray
+```
+
+### Quick Install Script (Alternative)
 
 ```bash
 git clone https://github.com/tyy130/linux-battery-tray.git
@@ -48,7 +65,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### Ubuntu/Debian
+### Manual Dependencies Installation
+
+#### Ubuntu/Debian
 
 ```bash
 # Install dependencies

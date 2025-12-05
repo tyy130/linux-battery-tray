@@ -35,17 +35,18 @@ MENU_CSS = """
     font-size: 0.9em;
 }
 .battery-progress {
-    min-height: 8px;
+    min-height: 10px;
     margin: 8px 12px;
-    border-radius: 4px;
+    border-radius: 5px;
 }
 .battery-progress trough {
-    min-height: 8px;
-    border-radius: 4px;
+    min-height: 10px;
+    border-radius: 5px;
+    background-color: alpha(currentColor, 0.1);
 }
 .battery-progress progress {
-    min-height: 8px;
-    border-radius: 4px;
+    min-height: 10px;
+    border-radius: 5px;
 }
 """
 
@@ -175,10 +176,10 @@ class BatteryIndicator:
         # Separator before system actions
         menu.append(Gtk.SeparatorMenuItem())
 
-        # Uninstall button
-        uninstall_item = Gtk.MenuItem(label="Uninstall")
-        uninstall_item.connect("activate", self._on_uninstall_clicked)
-        menu.append(uninstall_item)
+        # About button
+        about_item = Gtk.MenuItem(label="About")
+        about_item.connect("activate", self._on_about_clicked)
+        menu.append(about_item)
 
         # Quit button
         quit_item = Gtk.MenuItem(label="Quit")
@@ -570,82 +571,18 @@ class BatteryIndicator:
             "normal"
         )
 
-    def _on_uninstall_clicked(self, widget: Gtk.MenuItem) -> None:
-        """Handle uninstall button click - shows confirmation and uninstalls."""
-        # Create confirmation dialog
-        dialog = Gtk.MessageDialog(
-            transient_for=None,
-            flags=0,
-            message_type=Gtk.MessageType.QUESTION,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text="Uninstall Battery Indicator?"
-        )
-        dialog.format_secondary_text(
-            "This will remove the Battery Indicator application from your system. "
-            "You can reinstall it later by running the install script again."
-        )
-
-        response = dialog.run()
-        dialog.destroy()
-
-        if response == Gtk.ResponseType.YES:
-            self._perform_uninstall()
-
-    def _perform_uninstall(self) -> None:
-        """Perform the actual uninstallation."""
-        # Validate install directory to prevent accidental deletion of system files
-        # Only allow uninstall from the expected installation directory
-        expected_install_dir = "/opt/battery-indicator"
-        if self.install_dir != expected_install_dir:
-            self.send_notification(
-                "Uninstall Error",
-                "Invalid installation directory. Please uninstall manually.",
-                "normal"
-            )
-            return
-
-        # Show progress notification
-        self.send_notification(
-            "Uninstalling",
-            "Removing Battery Indicator...",
-            "normal"
-        )
-
-        # Uninstall commands with explicit paths (not user-configurable)
-        uninstall_commands = [
-            ['sudo', 'rm', '-rf', expected_install_dir],
-            ['sudo', 'rm', '-f', '/usr/share/applications/battery-indicator.desktop'],
-            ['rm', '-f', os.path.expanduser('~/.config/autostart/battery-indicator.desktop')],
-            ['sudo', 'rm', '-f', '/usr/local/bin/battery-indicator'],
-        ]
-
-        success = True
-        for cmd in uninstall_commands:
-            try:
-                result = subprocess.run(cmd, capture_output=True, timeout=30)
-                if result.returncode != 0 and 'sudo' in cmd:
-                    # Try with pkexec for graphical sudo
-                    pkexec_cmd = ['pkexec'] + cmd[1:]  # Remove sudo, add pkexec
-                    pkexec_result = subprocess.run(pkexec_cmd, capture_output=True, timeout=30)
-                    if pkexec_result.returncode != 0:
-                        success = False
-            except (subprocess.SubprocessError, FileNotFoundError):
-                success = False
-
-        if success:
-            self.send_notification(
-                "Uninstall Complete",
-                "Battery Indicator has been removed. The application will now close.",
-                "normal"
-            )
-            # Give the notification time to show, then quit
-            GLib.timeout_add(1500, Gtk.main_quit)
-        else:
-            self.send_notification(
-                "Uninstall Issue",
-                "Some files may not have been removed. You may need to run the uninstall manually with sudo.",
-                "normal"
-            )
+    def _on_about_clicked(self, widget: Gtk.MenuItem) -> None:
+        """Handle about button click."""
+        about = Gtk.AboutDialog()
+        about.set_program_name("Battery Indicator")
+        about.set_version("1.0.0")
+        about.set_comments("A lightweight system tray battery indicator for Linux.")
+        about.set_website("https://github.com/tyy130/linux-battery-tray")
+        about.set_authors(["tyy130"])
+        about.set_logo_icon_name("battery-full-symbolic")
+        about.set_license_type(Gtk.License.MIT_X11)
+        about.run()
+        about.destroy()
 
     def _on_quit_clicked(self, widget: Gtk.MenuItem) -> None:
         """Handle quit button click."""

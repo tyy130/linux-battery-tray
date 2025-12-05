@@ -1,0 +1,10 @@
+Package: linux-battery-tray
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-gi, gir1.2-appindicator3-0.1, gir1.2-gtk-3.0, upower, libnotify-bin
+Maintainer: tyy130 <tyy130@example.com>
+Description: Lightweight system tray battery indicator
+ A lightweight, reliable system tray battery indicator for Linux using Python and GTK3.
+ Provides real-time battery status, notifications, and detailed information via a dropdown menu.
