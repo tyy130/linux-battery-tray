@@ -48,3 +48,9 @@ This is a lightweight Linux system tray battery indicator written in Python usin
 - `battery_indicator.py`: Main logic and UI construction.
 - `config.py`: Configuration constants.
 - `install.sh`: Deployment and dependency logic.
+- `packaging/`: Scripts to build a Debian package and DEBIAN metadata (control, postinst), including `build_deb.sh`.
+
+### Notes
+- New config items: `TIME_SMOOTHING_WINDOW`, `HEALTH_WARNING_THRESHOLD`, `LOW_BATTERY_UPDATE_INTERVAL`, and `POWER_MODE_PRESETS` are added to `config.py` for customizing smoothing and power mode behavior.
+- Quick Settings (Battery Saver toggle and Power Mode presets) rely on `powerprofilesctl` where available. Brightness adjustments use `brightnessctl` when present.
+- Editable presets are saved to `~/.config/battery-indicator/presets.json` and loaded at runtime.

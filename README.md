@@ -141,6 +141,12 @@ The tray menu includes a "Quick Settings" submenu with the following options:
 
 If `powerprofilesctl` is not installed, Power Mode options will not function; brightness changes use `brightnessctl` when available.
 
+## Battery Health & Smoothing
+
+- The indicator uses a smoothing window on upower estimates to avoid flickering time estimates and icon changes, especially when the battery has degraded health.
+- If your battery health is below the configured threshold (default 40%), the app will show a dialog with a health warning and suggestions.
+- When the battery is low (below config thresholds), the app increases update frequency to keep information accurate.
+
 ## Configuration
 
 Edit `config.py` to customize the behavior:
