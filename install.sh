@@ -56,7 +56,9 @@ install_dependencies() {
                 gir1.2-appindicator3-0.1 \
                 gir1.2-gtk-3.0 \
                 upower \
-                libnotify-bin
+                libnotify-bin \
+                power-profiles-daemon \
+                brightnessctl
             ;;
         dnf)
             sudo dnf install -y \
@@ -65,7 +67,9 @@ install_dependencies() {
                 libappindicator-gtk3 \
                 gtk3 \
                 upower \
-                libnotify
+                libnotify \
+                power-profiles-daemon \
+                brightnessctl
             ;;
         pacman)
             sudo pacman -Sy --noconfirm \
@@ -74,7 +78,9 @@ install_dependencies() {
                 libappindicator-gtk3 \
                 gtk3 \
                 upower \
-                libnotify
+                libnotify \
+                power-profiles-daemon \
+                brightnessctl
             ;;
         *)
             print_error "Unknown package manager. Please install dependencies manually:"
@@ -84,6 +90,8 @@ install_dependencies() {
             echo "  - GTK 3.0"
             echo "  - upower"
             echo "  - libnotify (notify-send)"
+            echo "  - power-profiles-daemon"
+            echo "  - brightnessctl"
             return 1
             ;;
     esac
@@ -97,10 +105,14 @@ install_application() {
 
     # Create installation directory
     sudo mkdir -p "$INSTALL_DIR"
+    sudo mkdir -p "$INSTALL_DIR/icons"
 
     # Copy application files
     sudo cp battery_indicator.py "$INSTALL_DIR/"
     sudo cp config.py "$INSTALL_DIR/"
+    
+    # Copy custom icons
+    sudo cp icons/*.svg "$INSTALL_DIR/icons/"
 
     # Make main script executable
     sudo chmod +x "$INSTALL_DIR/battery_indicator.py"
